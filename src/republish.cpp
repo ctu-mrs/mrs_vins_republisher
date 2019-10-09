@@ -17,6 +17,7 @@ ros::Subscriber sub;
 geometry_msgs::TransformStamped             transformStamped;
 tf2_ros::Buffer                             tfBuffer;
 std::shared_ptr<tf2_ros::TransformListener> tfListener;
+double is_odom_main;
 
 void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   nav_msgs::Odometry                       odom_trans;
@@ -68,19 +69,36 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "vins_republish_node");
   ros::NodeHandle node("~");
 
-  nav_msgs::Odometry_<std::allocator<void>> odom_main = *(ros::topic::waitForMessage<nav_msgs::Odometry>("odom_main_in", node));
+  node.param<double>("is_odom_main", is_odom_main, 0);
+  ROS_INFO("is_odom_main: %f", is_odom_main);
+
+  nav_msgs::Odometry_<std::allocator<void>> odom_main;
+  if (is_odom_main) {
+    odom_main = *(ros::topic::waitForMessage<nav_msgs::Odometry>("odometry/odom_main"));
+
+    transformStamped.transform.translation.x = odom_main.pose.pose.position.x;
+    transformStamped.transform.translation.y = odom_main.pose.pose.position.y;
+    transformStamped.transform.translation.z = odom_main.pose.pose.position.z;
+    transformStamped.transform.rotation.x    = odom_main.pose.pose.orientation.x;
+    transformStamped.transform.rotation.y    = odom_main.pose.pose.orientation.y;
+    transformStamped.transform.rotation.z    = odom_main.pose.pose.orientation.z;
+    transformStamped.transform.rotation.w    = odom_main.pose.pose.orientation.w;
+  } else {
+    ROS_INFO("no odom main");
+    transformStamped.transform.translation.x = 0;
+    transformStamped.transform.translation.y = 0;
+    transformStamped.transform.translation.z = 0;
+    transformStamped.transform.rotation.x    = 0;
+    transformStamped.transform.rotation.y    = 0;
+    transformStamped.transform.rotation.z    = 0;
+    transformStamped.transform.rotation.w    = 1;
+  }
+
   nav_msgs::Odometry_<std::allocator<void>> odom_vins = *(ros::topic::waitForMessage<nav_msgs::Odometry>("vins_odom_in", node));
 
   transformStamped.header.stamp            = ros::Time::now();
   transformStamped.header.frame_id         = "local_origin";
   transformStamped.child_frame_id          = "world";
-  transformStamped.transform.translation.x = odom_main.pose.pose.position.x;
-  transformStamped.transform.translation.y = odom_main.pose.pose.position.y;
-  transformStamped.transform.translation.z = odom_main.pose.pose.position.z;
-  transformStamped.transform.rotation.x    = odom_main.pose.pose.orientation.x;
-  transformStamped.transform.rotation.y    = odom_main.pose.pose.orientation.y;
-  transformStamped.transform.rotation.z    = odom_main.pose.pose.orientation.z;
-  transformStamped.transform.rotation.w    = odom_main.pose.pose.orientation.w;
 
   ros::Timer timer = node.createTimer(ros::Duration(0.001), postTransformation);
   sub              = node.subscribe("vins_odom_in", 1000, odometryCallback);

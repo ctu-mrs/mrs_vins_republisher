@@ -2,11 +2,13 @@
   <arg name="uav_name" default="$(optenv UAV_NAME uav)"/>
 
   <group ns="$(arg uav_name)">
-      <node pkg="vins_republish" name="vins_republish" type="vins_republish_node" output="screen">
-        <remap from="~odom_main_in" to="odometry/odom_main"/>
-        <remap from="~vins_odom_in" to="/vins_estimator/odometry"/>
-        <remap from="~vins_odom_out" to="/vins_estimator/odometry_tf"/>
-        <remap from="~rpy_out" to="/vins_estimator/rpy"/>
-      </node>
+    <node pkg="vins_republish" name="vins_republish" type="vins_republish_node" output="screen">
+      <remap from="~odom_main_in" to="odometry/odom_main"/>
+      <remap from="~vins_odom_in" to="/vins_estimator/odometry"/>
+      <remap from="~vins_odom_out" to="/vins_estimator/odometry_tf"/>
+      <remap from="~rpy_out" to="/vins_estimator/rpy"/>
+
+      <param name="odom_main" value="0"/>
+    </node>
   </group>
 </launch>
