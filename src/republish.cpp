@@ -17,7 +17,8 @@ ros::Subscriber sub;
 geometry_msgs::TransformStamped             transformStamped;
 tf2_ros::Buffer                             tfBuffer;
 std::shared_ptr<tf2_ros::TransformListener> tfListener;
-double is_odom_main;
+double                                      is_odom_main;
+tf2::Quaternion                             q_new, q_rot;
 
 void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   nav_msgs::Odometry                       odom_trans;
@@ -39,6 +40,16 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   tf2::doTransform(pose_stamped, pose_stamped, transformStamped);
   odom_trans.pose   = pose_stamped.pose;
   odom_trans.header = pose_stamped.header;
+  
+  /* tf2::fromMsg(odom_trans.pose.pose.orientation, q); */
+  /* q_rot = tf2::Quaternion(0.7071068, 0, 0, 0.7071068); */
+    /* 30 deg */
+    /* q_rot = tf2::Quaternion(0, -0.258819, 0, 0.9659258); */
+  /* q_rot = tf2::Quaternion(0, -0.7071068, 0, 0.7071068); */
+  /* q_rot = tf2::Quaternion(0, 0, 0, 1); */
+  /* q_new = q_rot * q; */
+  /* q_new.normalize(); */
+  /* tf2::convert(q_new, odom_trans.pose.pose.orientation); */
 
   vect3 = odom->twist.twist.angular;
   tf2::doTransform(vect3, vect3, transformStamped);
@@ -96,9 +107,9 @@ int main(int argc, char **argv) {
 
   nav_msgs::Odometry_<std::allocator<void>> odom_vins = *(ros::topic::waitForMessage<nav_msgs::Odometry>("vins_odom_in", node));
 
-  transformStamped.header.stamp            = ros::Time::now();
-  transformStamped.header.frame_id         = "local_origin";
-  transformStamped.child_frame_id          = "world";
+  transformStamped.header.stamp    = ros::Time::now();
+  transformStamped.header.frame_id = "local_origin";
+  transformStamped.child_frame_id  = "world";
 
   ros::Timer timer = node.createTimer(ros::Duration(0.001), postTransformation);
   sub              = node.subscribe("vins_odom_in", 1000, odometryCallback);
