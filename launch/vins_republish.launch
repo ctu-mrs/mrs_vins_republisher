@@ -8,7 +8,7 @@
       <remap from="~vins_odom_out" to="/vins_estimator/odometry_tf"/>
       <remap from="~rpy_out" to="/vins_estimator/rpy"/>
 
-      <param name="odom_main" value="0"/>
+      <param name="is_odom_main" value="0"/>
     </node>
   </group>
 </launch>
