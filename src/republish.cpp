@@ -9,6 +9,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <std_msgs/String.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 ros::Publisher  odom_pub;
 ros::Publisher  rpy_pub;
@@ -16,7 +17,6 @@ ros::Subscriber sub;
 
 geometry_msgs::TransformStamped             transformStamped;
 tf2_ros::Buffer                             tfBuffer;
-std::shared_ptr<tf2_ros::TransformListener> tfListener;
 double                                      is_odom_main;
 tf2::Quaternion                             q_new, q_rot;
 
@@ -26,13 +26,6 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   geometry_msgs::Vector3                   vect3;
   geometry_msgs::Vector3Stamped            rpy;
   tf2::Quaternion                          q;
-
-  try {
-    transformStamped = tfBuffer.lookupTransform("local_origin", "world", ros::Time(0));
-  }
-  catch (tf2::TransformException &ex) {
-    ROS_WARN("Could NOT transform local_origin to world: %s", ex.what());
-  }
 
   /* Transform the Odometry message */
   pose_stamped.header = odom->header;
@@ -70,15 +63,11 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* ROS_INFO("after_publish"); */
 }
 
-void postTransformation(const ros::TimerEvent &) {
-  static tf2_ros::TransformBroadcaster br;
-  transformStamped.header.stamp = ros::Time::now();
-  br.sendTransform(transformStamped);
-}
-
 int main(int argc, char **argv) {
   ros::init(argc, argv, "vins_republish_node");
   ros::NodeHandle node("~");
+
+  static tf2_ros::StaticTransformBroadcaster static_broadcaster;
 
   node.param<double>("is_odom_main", is_odom_main, 0);
   ROS_INFO("is_odom_main: %f", is_odom_main);
@@ -111,12 +100,11 @@ int main(int argc, char **argv) {
   transformStamped.header.frame_id = "local_origin";
   transformStamped.child_frame_id  = "world";
 
-  ros::Timer timer = node.createTimer(ros::Duration(0.001), postTransformation);
   sub              = node.subscribe("vins_odom_in", 1000, odometryCallback);
   odom_pub         = node.advertise<nav_msgs::Odometry>("vins_odom_out", 1000);
   rpy_pub          = node.advertise<geometry_msgs::Vector3Stamped>("rpy_out", 1000);
 
-  tfListener = std::make_shared<tf2_ros::TransformListener>(tfBuffer);
+  static_broadcaster.sendTransform(transformStamped);
 
   ros::spin();
 
