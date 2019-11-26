@@ -9,6 +9,8 @@
       <remap from="~rpy_out" to="/vins_estimator/rpy"/>
 
       <param name="is_odom_main" value="0"/>
+      <param name="header_frame" value="$(arg uav_name)/local_origin"/>
+      <!-- <param name="header_frame" value="local_origin"/> -->
     </node>
   </group>
 </launch>

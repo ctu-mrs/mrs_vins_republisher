@@ -15,10 +15,11 @@ ros::Publisher  odom_pub;
 ros::Publisher  rpy_pub;
 ros::Subscriber sub;
 
-geometry_msgs::TransformStamped             transformStamped;
-tf2_ros::Buffer                             tfBuffer;
-double                                      is_odom_main;
-tf2::Quaternion                             q_new, q_rot;
+geometry_msgs::TransformStamped transformStamped;
+tf2_ros::Buffer                 tfBuffer;
+double                          is_odom_main;
+tf2::Quaternion                 q_new, q_rot;
+std::string                     header_frame;
 
 void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   nav_msgs::Odometry                       odom_trans;
@@ -31,13 +32,14 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   pose_stamped.header = odom->header;
   pose_stamped.pose   = odom->pose;
   tf2::doTransform(pose_stamped, pose_stamped, transformStamped);
-  odom_trans.pose   = pose_stamped.pose;
-  odom_trans.header = pose_stamped.header;
-  
+  odom_trans.header          = odom->header;
+  odom_trans.pose            = pose_stamped.pose;
+  odom_trans.header.frame_id = pose_stamped.header.frame_id;
+
   /* tf2::fromMsg(odom_trans.pose.pose.orientation, q); */
   /* q_rot = tf2::Quaternion(0.7071068, 0, 0, 0.7071068); */
-    /* 30 deg */
-    /* q_rot = tf2::Quaternion(0, -0.258819, 0, 0.9659258); */
+  /* 30 deg */
+  /* q_rot = tf2::Quaternion(0, -0.258819, 0, 0.9659258); */
   /* q_rot = tf2::Quaternion(0, -0.7071068, 0, 0.7071068); */
   /* q_rot = tf2::Quaternion(0, 0, 0, 1); */
   /* q_new = q_rot * q; */
@@ -53,7 +55,7 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_trans.twist.twist.linear = vect3;
 
   /* Create yaw/pitch/roll vector */
-  rpy.header = pose_stamped.header;
+  rpy.header = odom_trans.header;
   tf2::fromMsg(pose_stamped.pose.pose.orientation, q);
   tf2::Matrix3x3(q).getRPY(rpy.vector.x, rpy.vector.y, rpy.vector.z);
 
@@ -71,6 +73,8 @@ int main(int argc, char **argv) {
 
   node.param<double>("is_odom_main", is_odom_main, 0);
   ROS_INFO("is_odom_main: %f", is_odom_main);
+  node.param<std::string>("header_frame", header_frame, "uav1/local_origin");
+  ROS_INFO("header_frame: %s", header_frame.c_str());
 
   nav_msgs::Odometry_<std::allocator<void>> odom_main;
   if (is_odom_main) {
@@ -97,12 +101,12 @@ int main(int argc, char **argv) {
   nav_msgs::Odometry_<std::allocator<void>> odom_vins = *(ros::topic::waitForMessage<nav_msgs::Odometry>("vins_odom_in", node));
 
   transformStamped.header.stamp    = ros::Time::now();
-  transformStamped.header.frame_id = "local_origin";
+  transformStamped.header.frame_id = header_frame;
   transformStamped.child_frame_id  = "world";
 
-  sub              = node.subscribe("vins_odom_in", 1000, odometryCallback);
-  odom_pub         = node.advertise<nav_msgs::Odometry>("vins_odom_out", 1000);
-  rpy_pub          = node.advertise<geometry_msgs::Vector3Stamped>("rpy_out", 1000);
+  sub      = node.subscribe("vins_odom_in", 1000, odometryCallback);
+  odom_pub = node.advertise<nav_msgs::Odometry>("vins_odom_out", 1000);
+  rpy_pub  = node.advertise<geometry_msgs::Vector3Stamped>("rpy_out", 1000);
 
   static_broadcaster.sendTransform(transformStamped);
 
