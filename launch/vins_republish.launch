@@ -8,8 +8,11 @@
       <remap from="~vins_odom_out" to="/vins_estimator/odometry_tf"/>
       <remap from="~rpy_out" to="/vins_estimator/rpy"/>
 
-      <param name="is_odom_main" value="0"/>
+      <param name="is_odom_main" value="1"/>
+      <!-- simulation -->
       <param name="header_frame" value="$(arg uav_name)/local_origin"/>
+      <!-- real -->
+      <!-- <param name="header_frame" value="local_origin"/> -->
       <!-- <param name="header_frame" value="local_origin"/> -->
     </node>
   </group>
