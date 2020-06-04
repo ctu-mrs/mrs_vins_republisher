@@ -35,6 +35,7 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_trans.header          = odom->header;
   odom_trans.pose            = pose_stamped.pose;
   odom_trans.header.frame_id = pose_stamped.header.frame_id;
+  odom_trans.pose.pose.orientation = odom->pose.pose.orientation;
 
   /* tf2::fromMsg(odom_trans.pose.pose.orientation, q); */
   /* q_rot = tf2::Quaternion(0.7071068, 0, 0, 0.7071068); */
@@ -73,7 +74,7 @@ int main(int argc, char **argv) {
 
   node.param<double>("is_odom_main", is_odom_main, 0);
   ROS_INFO("is_odom_main: %f", is_odom_main);
-  node.param<std::string>("header_frame", header_frame, "uav1/local_origin");
+  node.param<std::string>("header_frame", header_frame, "vio_tf");
   ROS_INFO("header_frame: %s", header_frame.c_str());
 
   nav_msgs::Odometry_<std::allocator<void>> odom_main;
@@ -94,8 +95,8 @@ int main(int argc, char **argv) {
     transformStamped.transform.translation.z = 0;
     transformStamped.transform.rotation.x    = 0;
     transformStamped.transform.rotation.y    = 0;
-    transformStamped.transform.rotation.z    = 0;
-    transformStamped.transform.rotation.w    = 1;
+    transformStamped.transform.rotation.z    = 0.707;
+    transformStamped.transform.rotation.w    = 0.707;
   }
 
   nav_msgs::Odometry_<std::allocator<void>> odom_vins = *(ros::topic::waitForMessage<nav_msgs::Odometry>("vins_odom_in", node));

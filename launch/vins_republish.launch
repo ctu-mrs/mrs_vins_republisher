@@ -8,9 +8,10 @@
       <remap from="~vins_odom_out" to="/vins_estimator/odometry_tf"/>
       <remap from="~rpy_out" to="/vins_estimator/rpy"/>
 
-      <param name="is_odom_main" value="1"/>
+      <param name="is_odom_main" value="0"/>
       <!-- simulation -->
-      <param name="header_frame" value="$(arg uav_name)/local_origin"/>
+      <!-- <param name="header_frame" value="$(arg uav_name)/local_origin"/> -->
+      <param name="header_frame" value="vio_tf"/>
       <!-- real -->
       <!-- <param name="header_frame" value="local_origin"/> -->
       <!-- <param name="header_frame" value="local_origin"/> -->
