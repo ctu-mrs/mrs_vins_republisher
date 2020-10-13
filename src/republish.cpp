@@ -35,6 +35,8 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_trans.header          = odom->header;
   odom_trans.pose            = pose_stamped.pose;
   odom_trans.header.frame_id = pose_stamped.header.frame_id;
+
+  /* only for vins-mono */
   odom_trans.pose.pose.orientation = odom->pose.pose.orientation;
 
   /* tf2::fromMsg(odom_trans.pose.pose.orientation, q); */
