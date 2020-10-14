@@ -1,119 +1,258 @@
+/* includes //{ */
+
 #include <ros/ros.h>
+
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
+
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/TwistWithCovarianceStamped.h>
 #include <geometry_msgs/Vector3.h>
 #include <nav_msgs/Odometry.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <std_msgs/String.h>
+
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
-ros::Publisher  odom_pub;
-ros::Publisher  rpy_pub;
-ros::Subscriber sub;
+#include <mrs_lib/param_loader.h>
+#include <mrs_lib/transformer.h>
+#include <mrs_lib/mutex.h>
+#include <mrs_lib/attitude_converter.h>
+#include <mrs_lib/msg_extractor.h>
 
-geometry_msgs::TransformStamped transformStamped;
-tf2_ros::Buffer                 tfBuffer;
-double                          is_odom_main;
-tf2::Quaternion                 q_new, q_rot;
-std::string                     header_frame;
+//}
+
+ros::Publisher  publisher_odom_;
+ros::Time publisher_odom_last_published_;
+bool _rate_limiter_enabled_ = false;
+double _rate_limiter_rate_;
+
+ros::Subscriber subscriber_vins_;
+
+std::string _uav_name_;
+bool        is_initialized_ = false;
+
+mrs_lib::Transformer transformer_;
+
+std::string _camera_frame_;
+std::string _fcu_frame_;
+std::string _mrs_vins_world_frame_;
+std::string _vins_fcu_frame_;
+
+/* odometryCallback() //{ */
 
 void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
-  nav_msgs::Odometry                       odom_trans;
-  geometry_msgs::PoseWithCovarianceStamped pose_stamped;
-  geometry_msgs::Vector3                   vect3;
-  geometry_msgs::Vector3Stamped            rpy;
-  tf2::Quaternion                          q;
 
-  /* Transform the Odometry message */
-  pose_stamped.header = odom->header;
-  pose_stamped.pose   = odom->pose;
-  tf2::doTransform(pose_stamped, pose_stamped, transformStamped);
-  odom_trans.header          = odom->header;
-  odom_trans.pose            = pose_stamped.pose;
-  odom_trans.header.frame_id = pose_stamped.header.frame_id;
-
-  /* only for vins-mono */
-  odom_trans.pose.pose.orientation = odom->pose.pose.orientation;
-
-  /* tf2::fromMsg(odom_trans.pose.pose.orientation, q); */
-  /* q_rot = tf2::Quaternion(0.7071068, 0, 0, 0.7071068); */
-  /* 30 deg */
-  /* q_rot = tf2::Quaternion(0, -0.258819, 0, 0.9659258); */
-  /* q_rot = tf2::Quaternion(0, -0.7071068, 0, 0.7071068); */
-  /* q_rot = tf2::Quaternion(0, 0, 0, 1); */
-  /* q_new = q_rot * q; */
-  /* q_new.normalize(); */
-  /* tf2::convert(q_new, odom_trans.pose.pose.orientation); */
-
-  vect3 = odom->twist.twist.angular;
-  tf2::doTransform(vect3, vect3, transformStamped);
-  odom_trans.twist.twist.angular = vect3;
-
-  vect3 = odom->twist.twist.linear;
-  tf2::doTransform(vect3, vect3, transformStamped);
-  odom_trans.twist.twist.linear = vect3;
-
-  /* Create yaw/pitch/roll vector */
-  rpy.header = odom_trans.header;
-  tf2::fromMsg(pose_stamped.pose.pose.orientation, q);
-  tf2::Matrix3x3(q).getRPY(rpy.vector.x, rpy.vector.y, rpy.vector.z);
-
-  /* ROS_INFO("publish"); */
-  rpy_pub.publish(rpy);
-  odom_pub.publish(odom_trans);
-  /* ROS_INFO("after_publish"); */
-}
-
-int main(int argc, char **argv) {
-  ros::init(argc, argv, "vins_republish_node");
-  ros::NodeHandle node("~");
-
-  static tf2_ros::StaticTransformBroadcaster static_broadcaster;
-
-  node.param<double>("is_odom_main", is_odom_main, 0);
-  ROS_INFO("is_odom_main: %f", is_odom_main);
-  node.param<std::string>("header_frame", header_frame, "vio_tf");
-  ROS_INFO("header_frame: %s", header_frame.c_str());
-
-  nav_msgs::Odometry_<std::allocator<void>> odom_main;
-  if (is_odom_main) {
-    odom_main = *(ros::topic::waitForMessage<nav_msgs::Odometry>("odometry/odom_main"));
-
-    transformStamped.transform.translation.x = odom_main.pose.pose.position.x;
-    transformStamped.transform.translation.y = odom_main.pose.pose.position.y;
-    transformStamped.transform.translation.z = odom_main.pose.pose.position.z;
-    transformStamped.transform.rotation.x    = odom_main.pose.pose.orientation.x;
-    transformStamped.transform.rotation.y    = odom_main.pose.pose.orientation.y;
-    transformStamped.transform.rotation.z    = odom_main.pose.pose.orientation.z;
-    transformStamped.transform.rotation.w    = odom_main.pose.pose.orientation.w;
-  } else {
-    ROS_INFO("no odom main");
-    transformStamped.transform.translation.x = 0;
-    transformStamped.transform.translation.y = 0;
-    transformStamped.transform.translation.z = 0;
-    transformStamped.transform.rotation.x    = 0;
-    transformStamped.transform.rotation.y    = 0;
-    transformStamped.transform.rotation.z    = 0.707;
-    transformStamped.transform.rotation.w    = 0.707;
+  if (!is_initialized_) {
+    return;
   }
 
-  nav_msgs::Odometry_<std::allocator<void>> odom_vins = *(ros::topic::waitForMessage<nav_msgs::Odometry>("vins_odom_in", node));
+  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0/_rate_limiter_rate_)) {
+    ROS_INFO("[%s]: skipping over", ros::this_node::getName().c_str());
+    return; 
+  }
 
-  transformStamped.header.stamp    = ros::Time::now();
-  transformStamped.header.frame_id = header_frame;
-  transformStamped.child_frame_id  = "world";
+  ROS_INFO("[%s]: publishing", ros::this_node::getName().c_str());
 
-  sub      = node.subscribe("vins_odom_in", 1000, odometryCallback);
-  odom_pub = node.advertise<nav_msgs::Odometry>("vins_odom_out", 1000);
-  rpy_pub  = node.advertise<geometry_msgs::Vector3Stamped>("rpy_out", 1000);
+  geometry_msgs::PoseStamped vins_pose;
+  vins_pose.header = odom->header;
+  vins_pose.pose   = mrs_lib::getPose(odom);
 
-  static_broadcaster.sendTransform(transformStamped);
+  geometry_msgs::Vector3Stamped vins_velocity;
+  vins_velocity.header = odom->header;
+  vins_velocity.vector = odom->twist.twist.linear;
+
+  geometry_msgs::Vector3Stamped vins_ang_velocity;
+  vins_ang_velocity.header = odom->header;
+  vins_ang_velocity.vector = odom->twist.twist.angular;
+
+  mrs_lib::TransformStamped tf;
+
+  /* get the transform from mrs_vins_world to vins_world //{ */
+  
+  {
+    auto res = transformer_.getTransform(_mrs_vins_world_frame_, odom->header.frame_id, odom->header.stamp);
+  
+    if (!res) {
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s' at time '%f'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str(),
+                        odom->header.frame_id.c_str(), odom->header.stamp.toSec());
+      return;
+    }
+  
+    tf = res.value();
+  }
+  
+  //}
+
+  /* transform the vins pose to mrs_world_frame //{ */
+  
+  geometry_msgs::PoseStamped vins_pose_mrs_world;
+  
+  {
+    auto res = transformer_.transform(tf, vins_pose);
+  
+    if (!res) {
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins pose to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
+      return;
+    }
+  
+    vins_pose_mrs_world = res.value();
+  }
+
+  {
+    auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
+  
+    if (!res) {
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(), _vins_fcu_frame_.c_str());
+      return;
+    }
+
+    Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().getTransform().transform.rotation);
+
+    /* rotation << 0, 0, 1, */
+    /*             -1, 0, 0, */
+    /*             0, -1, 0; */
+
+    Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation);
+    vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(original_orientation * rotation);
+  }
+  
+  //}
+
+  geometry_msgs::Vector3Stamped vins_velocity_mrs_world;
+
+  /* transform the vins velocity to mrs_world_frame //{ */
+  
+  {
+    auto res = transformer_.transform(tf, vins_velocity);
+  
+    if (!res) {
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
+      return;
+    }
+  
+    vins_velocity_mrs_world = res.value();
+  }
+  
+  //}
+
+  geometry_msgs::Vector3Stamped vins_ang_velocity_mrs_world;
+
+  /* transform the vins angular velocity to mrs_world_frame //{ */
+  
+  {
+    auto res = transformer_.transform(tf, vins_ang_velocity);
+  
+    if (!res) {
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins angular velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
+      return;
+    }
+  
+    vins_ang_velocity_mrs_world = res.value();
+  }
+  
+  //}
+
+  geometry_msgs::Vector3 camera_to_fcu_translation;
+
+  /* find transform from camera frame to fcu frame //{ */
+  
+  {
+    auto res = transformer_.getTransform(_camera_frame_, _fcu_frame_, odom->header.stamp);
+  
+    if (!res) {
+  
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _camera_frame_.c_str(),
+                        _fcu_frame_.c_str());
+      return;
+    }
+  
+    camera_to_fcu_translation = res.value().getTransform().transform.translation;
+  }
+  
+  //}
+
+  // fill the new transformed odom message
+
+  nav_msgs::Odometry odom_trans;
+
+  odom_trans.header.stamp    = odom->header.stamp;
+  odom_trans.header.frame_id = _mrs_vins_world_frame_;
+
+  odom_trans.pose.pose           = vins_pose_mrs_world.pose;
+  odom_trans.twist.twist.linear  = vins_velocity_mrs_world.vector;
+  odom_trans.twist.twist.angular = vins_ang_velocity_mrs_world.vector;
+
+  try {
+    publisher_odom_.publish(odom_trans);
+
+    publisher_odom_last_published_ = ros::Time::now();
+  }
+  catch (...) {
+    ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
+  }
+}
+
+//}
+
+/* main() //{ */
+
+int main(int argc, char **argv) {
+
+  const std::string node_name("VinsRepublisher");
+
+  ros::init(argc, argv, node_name);
+  ros::NodeHandle nh("~");
+
+  ros::Time::waitForValid();
+
+  publisher_odom_last_published_ = ros::Time(0);
+
+  ROS_INFO("[%s]: loading parameters using ParamLoader", node_name.c_str());
+
+  mrs_lib::ParamLoader pl(nh, node_name);
+
+  pl.loadParam("uav_name", _uav_name_);
+
+  pl.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
+  pl.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
+
+  if (_rate_limiter_rate_ <= 1e-3) {
+    ROS_ERROR("[%s]: the rate limit has to be > 0", ros::this_node::getName().c_str());
+    ros::shutdown(); 
+  }
+
+  pl.loadParam("fcu_frame", _fcu_frame_);
+  pl.loadParam("camera_frame", _camera_frame_);
+  pl.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
+  pl.loadParam("vins_fcu_frame", _vins_fcu_frame_);
+
+  if (!pl.loadedSuccessfully()) {
+    ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
+    ros::shutdown();
+  }
+
+  transformer_ = mrs_lib::Transformer("VinsRepublisher", "");
+
+  /* nav_msgs::Odometry_<std::allocator<void>> odom_main; */
+
+  // | ----------------------- subscirbers ---------------------- |
+
+  subscriber_vins_ = nh.subscribe("vins_odom_in", 1, odometryCallback);
+
+  // | ----------------------- publishers ----------------------- |
+
+  publisher_odom_ = nh.advertise<nav_msgs::Odometry>("vins_odom_out", 1);
+
+  // | ----------------------- finish init ---------------------- |
+
+  is_initialized_ = true;
 
   ros::spin();
 
   return 0;
 };
+
+//}
