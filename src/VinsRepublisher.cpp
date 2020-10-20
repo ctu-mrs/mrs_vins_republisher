@@ -1,49 +1,71 @@
-/* includes //{ */
+#include <VinsRepublisher.h>
 
-#include <ros/ros.h>
+/* every nodelet must include macros which export the class as a nodelet plugin */
+#include <pluginlib/class_list_macros.h>
 
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2_ros/transform_broadcaster.h>
 
-#include <geometry_msgs/TransformStamped.h>
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
-#include <geometry_msgs/TwistWithCovarianceStamped.h>
-#include <geometry_msgs/Vector3.h>
-#include <nav_msgs/Odometry.h>
-#include <std_msgs/String.h>
+namespace vins_republisher
+{
 
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/static_transform_broadcaster.h>
+/* onInit() //{ */
 
-#include <mrs_lib/param_loader.h>
-#include <mrs_lib/transformer.h>
-#include <mrs_lib/mutex.h>
-#include <mrs_lib/attitude_converter.h>
-#include <mrs_lib/msg_extractor.h>
+void VinsRepublisher::onInit() {
+  const std::string node_name("VinsRepublisher");
 
+  /* obtain node handle */
+  /* ros::NodeHandle nh("~"); */
+  ros::NodeHandle nh_ = nodelet::Nodelet::getMTPrivateNodeHandle();
+
+  ROS_INFO("[%s]: Initializing", node_name.c_str());
+
+  /* waits for the ROS to publish clock */
+  ros::Time::waitForValid();
+
+  publisher_odom_last_published_ = ros::Time(0);
+
+  // | ---------- loading ros parameters using mrs_lib ---------- |
+  ROS_INFO("[%s]: loading parameters using ParamLoader", node_name.c_str());
+
+  mrs_lib::ParamLoader param_loader(nh_, node_name);
+
+  param_loader.loadParam("uav_name", _uav_name_);
+  param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
+  param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
+  if (_rate_limiter_rate_ <= 1e-3) {
+    ROS_ERROR("[%s]: the rate limit has to be > 0", ros::this_node::getName().c_str());
+    ros::shutdown(); 
+  }
+
+  param_loader.loadParam("fcu_frame", _fcu_frame_);
+  param_loader.loadParam("camera_frame", _camera_frame_);
+  param_loader.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
+  param_loader.loadParam("vins_fcu_frame", _vins_fcu_frame_);
+
+  if (!param_loader.loadedSuccessfully()) {
+    ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
+    ros::shutdown();
+  }
+
+  /* transformation handler */
+  transformer_ = mrs_lib::Transformer("VinsRepublisher", "");
+
+  // | ----------------------- subscribers ---------------------- |
+
+  subscriber_vins_ = nh_.subscribe("vins_odom_in", 1, &VinsRepublisher::odometryCallback, this);
+
+  // | ----------------------- publishers ----------------------- |
+
+  publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 1);
+
+  is_initialized_ = true;
+
+  ROS_INFO_ONCE("[%s]: initialized",node_name.c_str());
+}
 //}
-
-ros::Publisher  publisher_odom_;
-ros::Time publisher_odom_last_published_;
-bool _rate_limiter_enabled_ = false;
-double _rate_limiter_rate_;
-
-ros::Subscriber subscriber_vins_;
-
-std::string _uav_name_;
-bool        is_initialized_ = false;
-
-mrs_lib::Transformer transformer_;
-
-std::string _camera_frame_;
-std::string _fcu_frame_;
-std::string _mrs_vins_world_frame_;
-std::string _vins_fcu_frame_;
 
 /* odometryCallback() //{ */
 
-void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
+void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   if (!is_initialized_) {
     return;
@@ -197,62 +219,6 @@ void odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
 //}
 
-/* main() //{ */
-
-int main(int argc, char **argv) {
-
-  const std::string node_name("VinsRepublisher");
-
-  ros::init(argc, argv, node_name);
-  ros::NodeHandle nh("~");
-
-  ros::Time::waitForValid();
-
-  publisher_odom_last_published_ = ros::Time(0);
-
-  ROS_INFO("[%s]: loading parameters using ParamLoader", node_name.c_str());
-
-  mrs_lib::ParamLoader pl(nh, node_name);
-
-  pl.loadParam("uav_name", _uav_name_);
-
-  pl.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
-  pl.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
-
-  if (_rate_limiter_rate_ <= 1e-3) {
-    ROS_ERROR("[%s]: the rate limit has to be > 0", ros::this_node::getName().c_str());
-    ros::shutdown(); 
-  }
-
-  pl.loadParam("fcu_frame", _fcu_frame_);
-  pl.loadParam("camera_frame", _camera_frame_);
-  pl.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
-  pl.loadParam("vins_fcu_frame", _vins_fcu_frame_);
-
-  if (!pl.loadedSuccessfully()) {
-    ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
-    ros::shutdown();
-  }
-
-  transformer_ = mrs_lib::Transformer("VinsRepublisher", "");
-
-  /* nav_msgs::Odometry_<std::allocator<void>> odom_main; */
-
-  // | ----------------------- subscirbers ---------------------- |
-
-  subscriber_vins_ = nh.subscribe("vins_odom_in", 1, odometryCallback);
-
-  // | ----------------------- publishers ----------------------- |
-
-  publisher_odom_ = nh.advertise<nav_msgs::Odometry>("vins_odom_out", 1);
-
-  // | ----------------------- finish init ---------------------- |
-
-  is_initialized_ = true;
-
-  ros::spin();
-
-  return 0;
-};
-
-//}
+}
+/* every nodelet must export its class as nodelet plugin */
+PLUGINLIB_EXPORT_CLASS(vins_republisher::VinsRepublisher, nodelet::Nodelet);
