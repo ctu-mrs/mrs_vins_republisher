@@ -51,11 +51,11 @@ void VinsRepublisher::onInit() {
 
   // | ----------------------- subscribers ---------------------- |
 
-  subscriber_vins_ = nh_.subscribe("vins_odom_in", 1, &VinsRepublisher::odometryCallback, this);
+  subscriber_vins_ = nh_.subscribe("vins_odom_in", 10, &VinsRepublisher::odometryCallback, this, ros::TransportHints().tcpNoDelay());
 
   // | ----------------------- publishers ----------------------- |
 
-  publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 1);
+  publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 10);
 
   is_initialized_ = true;
 
@@ -66,17 +66,27 @@ void VinsRepublisher::onInit() {
 /* odometryCallback() //{ */
 
 void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
-
+  ros::WallTime start_, end_;
+  ROS_DEBUG("[]: ");
   if (!is_initialized_) {
     return;
   }
+  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.seq);
+  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.sec);
+  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.nsec);
+  start_ = ros::WallTime::now();
 
-  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0/_rate_limiter_rate_)) {
-    ROS_INFO("[%s]: skipping over", ros::this_node::getName().c_str());
+  ROS_DEBUG("[now]: %f",ros::Time::now().toSec());
+  ROS_DEBUG("[last published]: %f",publisher_odom_last_published_.toSec());
+  ROS_DEBUG("[fabs diff]: %f",fabs((ros::Time::now() - publisher_odom_last_published_).toSec()));
+  ROS_DEBUG("[diff]: %f",(ros::Time::now() - publisher_odom_last_published_).toSec());
+  ROS_DEBUG("[rate_limiter]: %f",1.0/_rate_limiter_rate_ );
+  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0/(_rate_limiter_rate_))) {
+    ROS_DEBUG("[%s]: skipping over", ros::this_node::getName().c_str());
     return; 
   }
 
-  ROS_INFO("[%s]: publishing", ros::this_node::getName().c_str());
+  ROS_DEBUG("[%s]: publishing", ros::this_node::getName().c_str());
 
   geometry_msgs::PoseStamped vins_pose;
   vins_pose.header = odom->header;
@@ -208,8 +218,11 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_trans.twist.twist.angular = vins_ang_velocity_mrs_world.vector;
 
   try {
+    end_ = ros::WallTime::now();
+    double execution_time = (end_ - start_).toNSec() * 1e-6;
+    ROS_DEBUG_STREAM("Exectution time (ms): " << execution_time);
     publisher_odom_.publish(odom_trans);
-
+    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
     publisher_odom_last_published_ = ros::Time::now();
   }
   catch (...) {

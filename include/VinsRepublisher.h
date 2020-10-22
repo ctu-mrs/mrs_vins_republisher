@@ -34,8 +34,8 @@ public:
 
 private:
   /* flags */
-  bool        is_initialized_ = false;
-  bool       _rate_limiter_enabled_ = false;
+  bool is_initialized_        = false;
+  bool _rate_limiter_enabled_ = false;
 
   /* ros parameters */
   std::string _uav_name_;
@@ -43,18 +43,17 @@ private:
   std::string _fcu_frame_;
   std::string _mrs_vins_world_frame_;
   std::string _vins_fcu_frame_;
+  double      _rate_limiter_rate_;
 
   // | ------------------------ callbacks ----------------------- |
   ros::Subscriber subscriber_vins_;
-  void odometryCallback(const nav_msgs::OdometryConstPtr &odom);
+  void            odometryCallback(const nav_msgs::OdometryConstPtr &odom);
 
   ros::Publisher publisher_odom_;
   ros::Time      publisher_odom_last_published_;
-  double         _rate_limiter_rate_;
 
   /* transformation handler */
   mrs_lib::Transformer transformer_;
-
 };
 }  // namespace vins_republisher
    /*//}*/
