@@ -105,7 +105,7 @@ void VinsRepublisher::onInit() {
   }
 
   /* transformation handler */
-  transformer_ = mrs_lib::Transformer("VinsRepublisher", "");
+  transformer_ = mrs_lib::Transformer("VinsRepublisher");
 
   // | ----------------------- subscribers ---------------------- |
 
@@ -164,6 +164,16 @@ bool VinsRepublisher::validateOdometry(const nav_msgs::Odometry &odometry) {
     return false;
   }
 
+  // check if the quaternion is sound
+
+  if (fabs(Eigen::Vector4d(odometry.pose.pose.orientation.x, odometry.pose.pose.orientation.y, odometry.pose.pose.orientation.z,
+                           odometry.pose.pose.orientation.w)
+               .norm() -
+           1.0) > 1e-2) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: orientation is not sound!!!");
+    return false;
+  }
+
   // check velocity
 
   if (!std::isfinite(odometry.twist.twist.linear.x)) {
@@ -194,16 +204,9 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  ROS_INFO("[VinsRepublisher]: odom x %.2f", odom->pose.pose.orientation.x);
-  ROS_INFO("[VinsRepublisher]: odom y %.2f", odom->pose.pose.orientation.y);
-  ROS_INFO("[VinsRepublisher]: odom z %.2f", odom->pose.pose.orientation.z);
-  ROS_INFO("[VinsRepublisher]: odom w %.2f", odom->pose.pose.orientation.w);
-
   if (!validateOdometry(*odom)) {
     ROS_ERROR("[VinsRepublisher]: input odometry is not numerically valid");
     return;
-  } else {
-    ROS_INFO("[VinsRepublisher]: odom is fine");
   }
 
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.seq);
