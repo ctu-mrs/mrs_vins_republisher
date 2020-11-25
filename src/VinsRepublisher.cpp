@@ -21,7 +21,6 @@
 #include <mrs_lib/mutex.h>
 #include <mrs_lib/attitude_converter.h>
 #include <mrs_lib/msg_extractor.h>
-#include <mrs_lib/scope_timer.h>
 
 #include <nodelet/nodelet.h>
 
@@ -195,12 +194,17 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
+  ROS_INFO("[VinsRepublisher]: odom x %.2f", odom->pose.pose.orientation.x);
+  ROS_INFO("[VinsRepublisher]: odom y %.2f", odom->pose.pose.orientation.y);
+  ROS_INFO("[VinsRepublisher]: odom z %.2f", odom->pose.pose.orientation.z);
+  ROS_INFO("[VinsRepublisher]: odom w %.2f", odom->pose.pose.orientation.w);
+
   if (!validateOdometry(*odom)) {
     ROS_ERROR("[VinsRepublisher]: input odometry is not numerically valid");
     return;
+  } else {
+    ROS_INFO("[VinsRepublisher]: odom is fine");
   }
-
-  mrs_lib::ScopeTimer scoped_timer("odometryCallback()");
 
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.seq);
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.sec);
