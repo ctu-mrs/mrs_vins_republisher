@@ -1,11 +1,70 @@
-#include <VinsRepublisher.h>
+/* includes //{ */
 
-/* every nodelet must include macros which export the class as a nodelet plugin */
+#include <ros/ros.h>
+
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_broadcaster.h>
+
+#include <geometry_msgs/TransformStamped.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <geometry_msgs/TwistWithCovarianceStamped.h>
+#include <geometry_msgs/Vector3.h>
+#include <nav_msgs/Odometry.h>
+#include <std_msgs/String.h>
+
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/static_transform_broadcaster.h>
+
+#include <mrs_lib/param_loader.h>
+#include <mrs_lib/transformer.h>
+#include <mrs_lib/mutex.h>
+#include <mrs_lib/attitude_converter.h>
+#include <mrs_lib/msg_extractor.h>
+#include <mrs_lib/scope_timer.h>
+
+#include <nodelet/nodelet.h>
+
 #include <pluginlib/class_list_macros.h>
 
+//}
 
 namespace vins_republisher
 {
+
+/* class VinsRepublisher //{ */
+
+class VinsRepublisher : public nodelet::Nodelet {
+public:
+  virtual void onInit();
+
+private:
+  /* flags */
+  bool is_initialized_        = false;
+  bool _rate_limiter_enabled_ = false;
+
+  /* ros parameters */
+  std::string _uav_name_;
+  std::string _camera_frame_;
+  std::string _fcu_frame_;
+  std::string _mrs_vins_world_frame_;
+  std::string _vins_fcu_frame_;
+  double      _rate_limiter_rate_;
+
+  bool validateOdometry(const nav_msgs::Odometry &odometry);
+
+  // | ------------------------ callbacks ----------------------- |
+  ros::Subscriber subscriber_vins_;
+  void            odometryCallback(const nav_msgs::OdometryConstPtr &odom);
+
+  ros::Publisher publisher_odom_;
+  ros::Time      publisher_odom_last_published_;
+
+  /* transformation handler */
+  mrs_lib::Transformer transformer_;
+};
+
+//}
 
 /* onInit() //{ */
 
@@ -33,7 +92,7 @@ void VinsRepublisher::onInit() {
   param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
   if (_rate_limiter_rate_ <= 1e-3) {
     ROS_ERROR("[%s]: the rate limit has to be > 0", ros::this_node::getName().c_str());
-    ros::shutdown(); 
+    ros::shutdown();
   }
 
   param_loader.loadParam("fcu_frame", _fcu_frame_);
@@ -59,31 +118,102 @@ void VinsRepublisher::onInit() {
 
   is_initialized_ = true;
 
-  ROS_INFO_ONCE("[%s]: initialized",node_name.c_str());
+  ROS_INFO_ONCE("[%s]: initialized", node_name.c_str());
 }
+//}
+
+/* validateOdometry() //{ */
+
+bool VinsRepublisher::validateOdometry(const nav_msgs::Odometry &odometry) {
+
+  // check position
+
+  if (!std::isfinite(odometry.pose.pose.position.x)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.x'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.pose.pose.position.y)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.y'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.pose.pose.position.z)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.z'!!!");
+    return false;
+  }
+
+  // check orientation
+
+  if (!std::isfinite(odometry.pose.pose.orientation.x)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.x'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.pose.pose.orientation.y)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.y'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.pose.pose.orientation.z)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.z'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.pose.pose.orientation.w)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.w'!!!");
+    return false;
+  }
+
+  // check velocity
+
+  if (!std::isfinite(odometry.twist.twist.linear.x)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.x'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.twist.twist.linear.y)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.y'!!!");
+    return false;
+  }
+
+  if (!std::isfinite(odometry.twist.twist.linear.z)) {
+    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.z'!!!");
+    return false;
+  }
+
+  return true;
+}
+
 //}
 
 /* odometryCallback() //{ */
 
 void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
-  ros::WallTime start_, end_;
-  ROS_DEBUG("[]: ");
+
   if (!is_initialized_) {
     return;
   }
+
+  if (!validateOdometry(*odom)) {
+    ROS_ERROR("[VinsRepublisher]: input odometry is not numerically valid");
+    return;
+  }
+
+  mrs_lib::ScopeTimer scoped_timer("odometryCallback()");
+
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.seq);
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.sec);
   ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.nsec);
-  start_ = ros::WallTime::now();
 
-  ROS_DEBUG("[now]: %f",ros::Time::now().toSec());
-  ROS_DEBUG("[last published]: %f",publisher_odom_last_published_.toSec());
-  ROS_DEBUG("[fabs diff]: %f",fabs((ros::Time::now() - publisher_odom_last_published_).toSec()));
-  ROS_DEBUG("[diff]: %f",(ros::Time::now() - publisher_odom_last_published_).toSec());
-  ROS_DEBUG("[rate_limiter]: %f",1.0/_rate_limiter_rate_ );
-  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0/(_rate_limiter_rate_))) {
+  ROS_DEBUG("[now]: %f", ros::Time::now().toSec());
+  ROS_DEBUG("[last published]: %f", publisher_odom_last_published_.toSec());
+  ROS_DEBUG("[fabs diff]: %f", fabs((ros::Time::now() - publisher_odom_last_published_).toSec()));
+  ROS_DEBUG("[diff]: %f", (ros::Time::now() - publisher_odom_last_published_).toSec());
+  ROS_DEBUG("[rate_limiter]: %f", 1.0 / _rate_limiter_rate_);
+  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0 / (_rate_limiter_rate_))) {
     ROS_DEBUG("[%s]: skipping over", ros::this_node::getName().c_str());
-    return; 
+    return;
   }
 
   ROS_DEBUG("[%s]: publishing", ros::this_node::getName().c_str());
@@ -103,41 +233,42 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   mrs_lib::TransformStamped tf;
 
   /* get the transform from mrs_vins_world to vins_world //{ */
-  
+
   {
     auto res = transformer_.getTransform(_mrs_vins_world_frame_, odom->header.frame_id, odom->header.stamp);
-  
+
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s' at time '%f'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str(),
                         odom->header.frame_id.c_str(), odom->header.stamp.toSec());
       return;
     }
-  
+
     tf = res.value();
   }
-  
+
   //}
 
   /* transform the vins pose to mrs_world_frame //{ */
-  
+
   geometry_msgs::PoseStamped vins_pose_mrs_world;
-  
+
   {
     auto res = transformer_.transform(tf, vins_pose);
-  
+
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins pose to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
       return;
     }
-  
+
     vins_pose_mrs_world = res.value();
   }
 
   {
     auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
-  
+
     if (!res) {
-      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(), _vins_fcu_frame_.c_str());
+      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(),
+                        _vins_fcu_frame_.c_str());
       return;
     }
 
@@ -150,64 +281,63 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation);
     vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(original_orientation * rotation);
   }
-  
+
   //}
 
   geometry_msgs::Vector3Stamped vins_velocity_mrs_world;
 
   /* transform the vins velocity to mrs_world_frame //{ */
-  
+
   {
     auto res = transformer_.transform(tf, vins_velocity);
-  
+
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
       return;
     }
-  
+
     vins_velocity_mrs_world = res.value();
   }
-  
+
   //}
 
   geometry_msgs::Vector3Stamped vins_ang_velocity_mrs_world;
 
   /* transform the vins angular velocity to mrs_world_frame //{ */
-  
+
   {
     auto res = transformer_.transform(tf, vins_ang_velocity);
-  
+
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins angular velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
       return;
     }
-  
+
     vins_ang_velocity_mrs_world = res.value();
   }
-  
+
   //}
 
   geometry_msgs::Vector3 camera_to_fcu_translation;
 
   /* find transform from camera frame to fcu frame //{ */
-  
+
   {
     auto res = transformer_.getTransform(_camera_frame_, _fcu_frame_, odom->header.stamp);
-  
+
     if (!res) {
-  
+
       ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _camera_frame_.c_str(),
                         _fcu_frame_.c_str());
       return;
     }
-  
+
     camera_to_fcu_translation = res.value().getTransform().transform.translation;
   }
-  
+
   //}
 
   // fill the new transformed odom message
-
   nav_msgs::Odometry odom_trans;
 
   odom_trans.header.stamp    = odom->header.stamp;
@@ -217,10 +347,12 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_trans.twist.twist.linear  = vins_velocity_mrs_world.vector;
   odom_trans.twist.twist.angular = vins_ang_velocity_mrs_world.vector;
 
+  if (!validateOdometry(odom_trans)) {
+    ROS_ERROR("[VinsRepublisher]: input odometry is not numerically valid");
+    return;
+  }
+
   try {
-    end_ = ros::WallTime::now();
-    double execution_time = (end_ - start_).toNSec() * 1e-6;
-    ROS_DEBUG_STREAM("Exectution time (ms): " << execution_time);
     publisher_odom_.publish(odom_trans);
     ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
     publisher_odom_last_published_ = ros::Time::now();
@@ -232,6 +364,6 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
 //}
 
-}
+}  // namespace vins_republisher
 /* every nodelet must export its class as nodelet plugin */
 PLUGINLIB_EXPORT_CLASS(vins_republisher::VinsRepublisher, nodelet::Nodelet);

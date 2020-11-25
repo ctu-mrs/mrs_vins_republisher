@@ -16,14 +16,14 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 catkin_package(
- INCLUDE_DIRS include
+ # INCLUDE_DIRS include
  LIBRARIES VinsRepublisher
  CATKIN_DEPENDS roscpp tf2 tf2_ros mrs_lib
  # DEPENDS system_lib
 )
 
 include_directories(
-  include
+  # include
   ${catkin_INCLUDE_DIRS}
 )
 
