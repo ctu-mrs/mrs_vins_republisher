@@ -104,6 +104,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   /* get the transform from mrs_vins_world to vins_world //{ */
   
+  /* Vins-mono uses different coordinate system. The y-axis is front, x-axis is right, z-axis is up */
+  /* This transformation rotates in yaw of 90 deg */
   {
     auto res = transformer_.getTransform(_mrs_vins_world_frame_, odom->header.frame_id, odom->header.stamp);
   
