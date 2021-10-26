@@ -44,7 +44,7 @@ private:
 
   /* ros parameters */
   std::string _uav_name_;
-  std::string _camera_frame_;
+  /* std::string _camera_frame_; */
   std::string _fcu_frame_;
   std::string _mrs_vins_world_frame_;
   std::string _vins_fcu_frame_;
@@ -95,7 +95,7 @@ void VinsRepublisher::onInit() {
   }
 
   param_loader.loadParam("fcu_frame", _fcu_frame_);
-  param_loader.loadParam("camera_frame", _camera_frame_);
+  /* param_loader.loadParam("camera_frame", _camera_frame_); */
   param_loader.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
   param_loader.loadParam("vins_fcu_frame", _vins_fcu_frame_);
 
@@ -328,24 +328,24 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   //}
 
-  geometry_msgs::Vector3 camera_to_fcu_translation;
+  /* geometry_msgs::Vector3 camera_to_fcu_translation; */
 
-  /* find transform from camera frame to fcu frame //{ */
+  /* /1* find transform from camera frame to fcu frame //{ *1/ */
 
-  {
-    auto res = transformer_.getTransform(_camera_frame_, _fcu_frame_, odom->header.stamp);
+  /* { */
+  /*   auto res = transformer_.getTransform(_camera_frame_, _fcu_frame_, odom->header.stamp); */
 
-    if (!res) {
+  /*   if (!res) { */
 
-      ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _camera_frame_.c_str(),
-                        _fcu_frame_.c_str());
-      return;
-    }
+  /*     ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _camera_frame_.c_str(), */
+  /*                       _fcu_frame_.c_str()); */
+  /*     return; */
+  /*   } */
 
-    camera_to_fcu_translation = res.value().getTransform().transform.translation;
-  }
+  /*   camera_to_fcu_translation = res.value().getTransform().transform.translation; */
+  /* } */
 
-  //}
+  /* //} */
 
   // fill the new transformed odom message
   nav_msgs::Odometry odom_trans;
