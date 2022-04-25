@@ -237,7 +237,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   vins_ang_velocity.header = odom->header;
   vins_ang_velocity.vector = odom->twist.twist.angular;
 
-  mrs_lib::TransformStamped tf;
+  geometry_msgs::TransformStamped tf;
 
   /* get the transform from mrs_vins_world to vins_world //{ */
   
@@ -263,7 +263,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   geometry_msgs::PoseStamped vins_pose_mrs_world;
 
   {
-    auto res = transformer_.transform(tf, vins_pose);
+    auto res = transformer_.transform(vins_pose, tf);
 
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins pose to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
@@ -282,7 +282,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       return;
     }
 
-    Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().getTransform().transform.rotation);
+    Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().transform.rotation);
 
     /* rotation << 0, 0, 1, */
     /*             -1, 0, 0, */
@@ -299,7 +299,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* transform the vins velocity to mrs_world_frame //{ */
 
   {
-    auto res = transformer_.transform(tf, vins_velocity);
+    auto res = transformer_.transform(vins_velocity, tf);
 
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
@@ -316,7 +316,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* transform the vins angular velocity to mrs_world_frame //{ */
 
   {
-    auto res = transformer_.transform(tf, vins_ang_velocity);
+    auto res = transformer_.transform(vins_ang_velocity, tf);
 
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not transform vins angular velocity to '%s'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str());
