@@ -36,7 +36,7 @@
 
       <param name="uav_name" value="$(arg UAV_NAME)"/>
 
-      <remap from="~vins_odom_in" to="/vins_estimator/imu_propagate"/>
+      <remap from="~vins_odom_in" to="vins_estimator/imu_propagate"/>
       <remap from="~vins_odom_out" to="~odom"/>
 
       <param name="fcu_frame" value="$(arg fcu_frame)"/>
