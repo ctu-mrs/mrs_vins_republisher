@@ -245,7 +245,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* This transformation rotates in yaw of 90 deg */
 
   {
-    auto res = transformer_.getTransform(_mrs_vins_world_frame_, odom->header.frame_id, odom->header.stamp);
+    auto res = transformer_.getTransform(odom->header.frame_id, _mrs_vins_world_frame_, odom->header.stamp);
 
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s' at time '%f'", ros::this_node::getName().c_str(), _mrs_vins_world_frame_.c_str(),
@@ -274,8 +274,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   }
 
   {
+    // transform from the VINS body frame to the UAV FCU frame
     auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
-
     if (!res) {
       ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(),
                         _vins_fcu_frame_.c_str());
@@ -283,13 +283,14 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     }
 
     Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().transform.rotation);
-
-    /* rotation << 0, 0, 1, */
-    /*             -1, 0, 0, */
-    /*             0, -1, 0; */
-
     Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation);
     vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(original_orientation * rotation);
+    Eigen::Vector3d t;
+    t << res.value().transform.translation.x, res.value().transform.translation.y, res.value().transform.translation.z;
+    Eigen::Vector3d translation = rotation.transpose() * t;
+    vins_pose_mrs_world.pose.position.x = vins_pose_mrs_world.pose.position.x + translation(0);
+    vins_pose_mrs_world.pose.position.y = vins_pose_mrs_world.pose.position.y + translation(1);
+    vins_pose_mrs_world.pose.position.z = vins_pose_mrs_world.pose.position.z + translation(2);
   }
 
   //}
