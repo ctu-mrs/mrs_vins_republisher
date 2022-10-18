@@ -44,6 +44,7 @@ private:
 
   /* ros parameters */
   std::string _uav_name_;
+  bool        _rotate_velocity_ = false;
   /* std::string _camera_frame_; */
   std::string _fcu_frame_;
   std::string _mrs_vins_world_frame_;
@@ -87,6 +88,7 @@ void VinsRepublisher::onInit() {
   mrs_lib::ParamLoader param_loader(nh_, node_name);
 
   param_loader.loadParam("uav_name", _uav_name_);
+  param_loader.loadParam("rotate_velocity", _rotate_velocity_);
   param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
   param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
   if (_rate_limiter_rate_ <= 1e-3) {
@@ -240,7 +242,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   geometry_msgs::TransformStamped tf;
 
   /* get the transform from mrs_vins_world to vins_world //{ */
-  
+
   /* Vins-mono uses different coordinate system. The y-axis is front, x-axis is right, z-axis is up */
   /* This transformation rotates in yaw of 90 deg */
 
@@ -273,6 +275,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     vins_pose_mrs_world = res.value();
   }
 
+  Eigen::Matrix3d rotation;
+
   {
     // transform from the VINS body frame to the UAV FCU frame
     auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
@@ -282,12 +286,12 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       return;
     }
 
-    Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().transform.rotation);
+    rotation                             = mrs_lib::AttitudeConverter(res.value().transform.rotation);
     Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation);
     vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(original_orientation * rotation);
     Eigen::Vector3d t;
     t << res.value().transform.translation.x, res.value().transform.translation.y, res.value().transform.translation.z;
-    Eigen::Vector3d translation = rotation.transpose() * t;
+    Eigen::Vector3d translation         = rotation.transpose() * t;
     vins_pose_mrs_world.pose.position.x = vins_pose_mrs_world.pose.position.x + translation(0);
     vins_pose_mrs_world.pose.position.y = vins_pose_mrs_world.pose.position.y + translation(1);
     vins_pose_mrs_world.pose.position.z = vins_pose_mrs_world.pose.position.z + translation(2);
@@ -300,6 +304,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* transform the vins velocity to mrs_world_frame //{ */
 
   {
+
     auto res = transformer_.transform(vins_velocity, tf);
 
     if (!res) {
@@ -308,6 +313,14 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     }
 
     vins_velocity_mrs_world = res.value();
+    if (_rotate_velocity_) {
+      Eigen::Vector3d v2;
+      v2 << vins_velocity.vector.x, vins_velocity.vector.y, vins_velocity.vector.z;
+      v2                               = rotation.transpose() * v2;
+      vins_velocity_mrs_world.vector.x = v2(0);
+      vins_velocity_mrs_world.vector.y = v2(1);
+      vins_velocity_mrs_world.vector.z = v2(2);
+    }
   }
 
   //}
@@ -325,6 +338,14 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     }
 
     vins_ang_velocity_mrs_world = res.value();
+    if (_rotate_velocity_) {
+      Eigen::Vector3d v2;
+      v2 << vins_ang_velocity.vector.x, vins_ang_velocity.vector.y, vins_ang_velocity.vector.z;
+      v2                                   = rotation.transpose() * v2;
+      vins_ang_velocity_mrs_world.vector.x = v2(0);
+      vins_ang_velocity_mrs_world.vector.y = v2(1);
+      vins_ang_velocity_mrs_world.vector.z = v2(2);
+    }
   }
 
   //}
