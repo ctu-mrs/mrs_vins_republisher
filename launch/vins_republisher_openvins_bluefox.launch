@@ -48,7 +48,7 @@
       <!-- set to true if velocity is defined in the IMU frame -->
       <param name="rotate_velocity" value="true"/>
 
-      <remap from="~vins_odom_in" to="/ov_msckf/odomimu"/>
+      <remap from="~vins_odom_in" to="ov_msckf/odomimu"/>
       <remap from="~vins_odom_out" to="~odom"/>
 
       <param name="fcu_frame" value="$(arg fcu_frame)"/>
