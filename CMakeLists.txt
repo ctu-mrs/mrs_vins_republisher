@@ -15,9 +15,13 @@ find_package(catkin REQUIRED COMPONENTS
   nodelet
 )
 
+set(LIBRARIES
+  MrsVinsRepublisher
+  )
+
 catkin_package(
  # INCLUDE_DIRS include
- LIBRARIES VinsRepublisher
+ LIBRARIES MrsVinsRepublisher
  CATKIN_DEPENDS roscpp tf2 tf2_ros mrs_lib
  # DEPENDS system_lib
 )
