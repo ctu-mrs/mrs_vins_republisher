@@ -1,5 +1,5 @@
 
-<library path="lib/libVinsRepublisher">
+<library path="lib/libMrsVinsRepublisher">
   <class name="vins_republisher/VinsRepublisher" type="vins_republisher::VinsRepublisher" base_class_type="nodelet::Nodelet">
     <description>VinsRepublisher nodelet</description>
   </class>

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="2">
   
-  <name>vins_republisher</name>
+  <name>mrs_vins_republisher</name>
   <version>0.0.0</version>
-  <description>The vins_republisher package</description>
+  <description>The mrs_vins_republisher package</description>
 
   <author email="bednaj14@fel.cvut.cz">Jan Bednar</author>
   <maintainer email="bednaj14@fel.cvut.cz">Jan Bednar</maintainer>

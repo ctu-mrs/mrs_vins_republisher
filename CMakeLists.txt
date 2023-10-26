@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(vins_republisher)
+project(mrs_vins_republisher)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++17)
@@ -28,12 +28,10 @@ include_directories(
 )
 
 ## Declare a C++ library
-add_library(VinsRepublisher src/VinsRepublisher.cpp)
-
-# add_executable(VinsRepublisher src/VinsRepublisher.cpp)
+add_library(MrsVinsRepublisher src/VinsRepublisher.cpp)
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(VinsRepublisher
+target_link_libraries(MrsVinsRepublisher
   ${catkin_LIBRARIES}
 )
 

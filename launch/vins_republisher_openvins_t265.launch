@@ -40,7 +40,7 @@
       <!-- ================= VinsRepublisher nodelet ================ -->
     <node pkg="nodelet" type="nodelet" name="vins_republisher" args="$(arg nodelet) vins_republisher/VinsRepublisher $(arg nodelet_manager)" launch-prefix="$(arg launch_prefix_debug)" output="screen">
 
-      <rosparam file="$(find vins_republisher)/config/default.yaml" command="load" />
+      <rosparam file="$(find mrs_vins_republisher)/config/default.yaml" command="load" />
 
       <param name="uav_name" value="$(arg UAV_NAME)"/>
 
