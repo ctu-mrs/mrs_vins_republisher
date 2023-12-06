@@ -28,11 +28,12 @@
 
       <!-- ================= Static transformations ================= -->
     <!-- TF between the VINS world frame and MRS VINS world frame -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 -1.5708 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" />
-    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 0.0 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" /> -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 -1.5708 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" /> -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 0.0 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" />
 
     <!-- TF between the FCU of the UAV and the VINS body (IMU) frame -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_fcu_to_mrs_fcu" args="0.067 0.0 -0.33 1.5708 0.0 1.5708 $(arg fcu_frame) $(arg vins_fcu_front_frame)" />
+    <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_fcu_to_mrs_fcu" args="0.067 0.0 -0.33 3.1415 1.5708 0.0 $(arg fcu_frame) $(arg vins_fcu_front_frame)" />
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_fcu_to_mrs_fcu" args="0.067 0.0 -0.33 0.0 0.0 0.0 $(arg fcu_frame) $(arg vins_fcu_front_frame)" /> -->
 
     <!-- TF for variable pitch of the camera -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_fcu_to_mrs_fcu2" args="0 0 0 0 0 $(arg camera_pitch) $(arg vins_fcu_front_frame) $(arg vins_fcu_frame)" />
