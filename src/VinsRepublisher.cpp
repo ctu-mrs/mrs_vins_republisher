@@ -107,7 +107,7 @@ void VinsRepublisher::onInit() {
   param_loader.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
   param_loader.loadParam("vins_fcu_frame", _vins_fcu_frame_);
 
-  param_loader.loadParam("init_in_zero", _init_in_zero_);
+  param_loader.loadParam("init_in_zero", _init_in_zero_, true);
 
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
