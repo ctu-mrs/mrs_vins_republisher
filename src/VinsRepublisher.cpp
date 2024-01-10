@@ -21,6 +21,7 @@
 #include <mrs_lib/mutex.h>
 #include <mrs_lib/attitude_converter.h>
 #include <mrs_lib/msg_extractor.h>
+#include <mrs_lib/geometry/conversions.h>
 
 #include <nodelet/nodelet.h>
 
@@ -50,6 +51,11 @@ private:
   std::string _mrs_vins_world_frame_;
   std::string _vins_fcu_frame_;
   double      _rate_limiter_rate_;
+  bool        _init_in_zero_;
+
+  bool               got_init_pose_ = false;
+  Eigen::Vector3d    init_position_eigen_;
+  Eigen::Quaterniond init_orientation_eigen_;
 
   bool validateOdometry(const nav_msgs::Odometry &odometry);
 
@@ -100,6 +106,8 @@ void VinsRepublisher::onInit() {
   /* param_loader.loadParam("camera_frame", _camera_frame_); */
   param_loader.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
   param_loader.loadParam("vins_fcu_frame", _vins_fcu_frame_);
+
+  param_loader.loadParam("init_in_zero", _init_in_zero_);
 
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
@@ -229,7 +237,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   geometry_msgs::PoseStamped vins_pose;
   vins_pose.header = odom->header;
-  vins_pose.pose   = mrs_lib::getPose(odom);
+
+  vins_pose.pose = mrs_lib::getPose(odom);
 
   geometry_msgs::Vector3Stamped vins_velocity;
   vins_velocity.header = odom->header;
@@ -304,7 +313,6 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* transform the vins velocity to mrs_world_frame //{ */
 
   {
-
     auto res = transformer_.transform(vins_velocity, tf);
 
     if (!res) {
@@ -368,6 +376,19 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* } */
 
   /* //} */
+
+  // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
+  if (_init_in_zero_ && !got_init_pose_) {
+    init_position_eigen_    = mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.position);
+    init_orientation_eigen_ = mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.orientation).inverse();
+    got_init_pose_          = true;
+  }
+
+  // compensate initialized orientation ambiguity
+  vins_pose_mrs_world.pose.position =
+      mrs_lib::geometry::fromEigen(init_orientation_eigen_ * (mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.position) - init_position_eigen_));
+  vins_pose_mrs_world.pose.orientation =
+      mrs_lib::geometry::fromEigen(mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.orientation) * init_orientation_eigen_);
 
   // fill the new transformed odom message
   nav_msgs::Odometry odom_trans;
