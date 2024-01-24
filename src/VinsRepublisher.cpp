@@ -53,9 +53,8 @@ private:
   double      _rate_limiter_rate_;
   bool        _init_in_zero_;
 
-  bool               got_init_pose_ = false;
-  Eigen::Vector3d    init_position_eigen_;
-  Eigen::Quaterniond init_orientation_eigen_;
+  bool   got_init_pose_ = false;
+  double init_hdg_;
 
   bool validateOdometry(const nav_msgs::Odometry &odometry);
 
@@ -68,6 +67,8 @@ private:
 
   /* transformation handler */
   mrs_lib::Transformer transformer_;
+
+  geometry_msgs::Point rotatePointByHdg(const geometry_msgs::Point &pt_in, const double hdg_in) const;
 };
 
 //}
@@ -378,17 +379,19 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   /* //} */
 
   // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
-  if (_init_in_zero_ && !got_init_pose_) {
-    init_position_eigen_    = mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.position);
-    init_orientation_eigen_ = mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.orientation).inverse();
-    got_init_pose_          = true;
+  if (_init_in_zero_) {
+    if (!got_init_pose_) {
+      init_hdg_ = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation).getHeading();
+      ROS_INFO("[VinsRepublisher]: init hdg: %.2f", init_hdg_);
+      got_init_pose_ = true;
+    }
+
+    // compensate initial heading ambiguity
+    const double hdg                     = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation).getHeading();
+    vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation).setHeading(hdg - init_hdg_);
+    vins_pose_mrs_world.pose.position    = rotatePointByHdg(vins_pose_mrs_world.pose.position, init_hdg_);
   }
 
-  // compensate initialized orientation ambiguity
-  vins_pose_mrs_world.pose.position =
-      mrs_lib::geometry::fromEigen(init_orientation_eigen_ * (mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.position) - init_position_eigen_));
-  vins_pose_mrs_world.pose.orientation =
-      mrs_lib::geometry::fromEigen(mrs_lib::geometry::toEigen(vins_pose_mrs_world.pose.orientation) * init_orientation_eigen_);
 
   // fill the new transformed odom message
   nav_msgs::Odometry odom_trans;
@@ -415,6 +418,24 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   }
 }
 
+//}
+
+/* //{ rotatePointByHdg() */
+geometry_msgs::Point VinsRepublisher::rotatePointByHdg(const geometry_msgs::Point &pt_in, const double hdg_in) const {
+
+  const tf2::Quaternion q_hdg = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(hdg_in);
+
+  const tf2::Vector3 vec_tf2(pt_in.x, pt_in.y, pt_in.z);
+
+  const tf2::Vector3 vec_rotated = tf2::quatRotate(q_hdg, vec_tf2);
+
+  geometry_msgs::Point pt_out;
+  pt_out.x = vec_rotated.x();
+  pt_out.y = vec_rotated.y();
+  pt_out.z = vec_rotated.z();
+
+  return pt_out;
+}
 //}
 
 }  // namespace vins_republisher

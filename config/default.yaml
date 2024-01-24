@@ -1,4 +1,4 @@
-# Subtract the first pose from all msgs so that the origin is in zero (OpenVINS sometimes starts rotated by pi/2)
+# Subtract the first heading from all msgs so that the origin is in zero (OpenVINS sometimes starts rotated by pi/2)
 init_in_zero: true
 
 rate_limiter:
