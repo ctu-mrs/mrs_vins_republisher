@@ -389,7 +389,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     // compensate initial heading ambiguity
     const double hdg                     = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation).getHeading();
     vins_pose_mrs_world.pose.orientation = mrs_lib::AttitudeConverter(vins_pose_mrs_world.pose.orientation).setHeading(hdg - init_hdg_);
-    vins_pose_mrs_world.pose.position    = rotatePointByHdg(vins_pose_mrs_world.pose.position, init_hdg_);
+    vins_pose_mrs_world.pose.position    = rotatePointByHdg(vins_pose_mrs_world.pose.position, -init_hdg_);
   }
 
 
