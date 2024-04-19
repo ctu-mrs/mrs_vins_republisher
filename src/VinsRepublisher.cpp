@@ -252,9 +252,12 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  // transform the pose
-  geometry_msgs::Pose pose_transformed;
-  tf2::doTransform(odom->pose.pose, pose_transformed, res.value());
+  // transform the pose with covariance
+  geometry_msgs::PoseWithCovarianceStamped pose_transformed;
+  geometry_msgs::PoseWithCovarianceStamped pose_orig;
+  pose_orig.header = odom->header;
+  pose_orig.pose = odom->pose;
+  tf2::doTransform(pose_orig, pose_transformed, res.value());
 
   geometry_msgs::TransformStamped tf_msg;
   tf_msg.header.stamp            = odom->header.stamp;
@@ -268,7 +271,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   // save initial heading to subtract it from all messages to compensate initialized heading ambiguity
   if (_init_in_zero_) {
     if (!got_init_pose_) {
-      init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
+      init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.pose.pose.orientation).getHeading();
       ROS_INFO("[VinsRepublisher]: init hdg: %.2f", init_hdg_);
       got_init_pose_ = true;
     }
@@ -297,7 +300,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   }
 
   // save the transformed pose
-  odom_transformed.pose.pose = pose_transformed;
+  odom_transformed.pose = pose_transformed.pose;
 
   // transform velocity - linear and angular
   // if in body frame - rotate from IMU frame to FCU frame
@@ -312,11 +315,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_transformed.twist.twist.linear  = linear_velocity;
   odom_transformed.twist.twist.angular = angular_velocity;
 
-
-  // transform covariance - apparently translation is in world frame and rotation is in body frame with fixed axes???
-  // if so, apply initial TF offset to translation part and IMU to FCU TF to rotation part??? + twist covariance...
-  /* tf2::transformCovariance( */
-
+  // TODO transform twist covariance
 
   // publish
   if (!validateOdometry(odom_transformed)) {
