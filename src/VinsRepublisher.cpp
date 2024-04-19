@@ -55,7 +55,7 @@ private:
   bool        _init_in_zero_;
 
   bool   got_init_pose_ = false;
-  double init_hdg_;
+  double init_hdg_      = 0;
 
   bool validateOdometry(const nav_msgs::Odometry &odometry);
 
@@ -260,31 +260,31 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_transformed.header          = odom->header;
   odom_transformed.header.frame_id = _mrs_vins_world_frame_;
 
-  // transform pose
-  geometry_msgs::Pose pose_transformed;
-  // first transform it from IMU frame to FCU frame
-  // transform from the VINS body frame to the UAV FCU frame
-  auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
+
+  // get transformation from the VINS body frame (i.e. IMU frame) to the UAV FCU frame
+  auto res = transformer_.getTransform(_vins_fcu_frame_, _fcu_frame_, odom->header.stamp);
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(),
                       _vins_fcu_frame_.c_str());
     return;
   }
 
-  Eigen::Matrix3d rotation             = mrs_lib::AttitudeConverter(res.value().transform.rotation);
-  Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(odom->pose.pose.orientation);
-  pose_transformed.orientation         = mrs_lib::AttitudeConverter(original_orientation * rotation);
-  /* pose_transformed.orientation = mrs_lib::AttitudeConverter(rotation.transpose() * original_orientation.transpose()); */
-  Eigen::Vector3d t;
-  t << res.value().transform.translation.x, res.value().transform.translation.y, res.value().transform.translation.z;
-  Eigen::Vector3d translation = rotation.transpose() * t;
-  pose_transformed.position.x = odom->pose.pose.position.x + translation(0);
-  pose_transformed.position.y = odom->pose.pose.position.y + translation(1);
-  pose_transformed.position.z = odom->pose.pose.position.z + translation(2);
+  Eigen::Matrix3d rotation = mrs_lib::AttitudeConverter(res.value().transform.rotation); // TODO remove
 
-  // then subtract initial pose (global 4 DOF)
-  // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
-  // TODO compensate position as well???
+  // transform the pose
+  geometry_msgs::Pose pose_transformed;
+  tf2::doTransform(odom->pose.pose, pose_transformed, res.value());
+
+  geometry_msgs::TransformStamped tf_msg;
+  tf_msg.header.stamp            = odom->header.stamp;
+  tf_msg.header.frame_id         = odom_transformed.header.frame_id;
+  tf_msg.child_frame_id          = odom->header.frame_id;
+  tf_msg.transform.translation.x = 0;
+  tf_msg.transform.translation.x = 0;
+  tf_msg.transform.translation.x = 0;
+  tf_msg.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(-init_hdg_);
+
+  // save initial heading to subtract it from all messages to compensate initialized heading ambiguity
   if (_init_in_zero_) {
     if (!got_init_pose_) {
       init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
@@ -292,37 +292,31 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       got_init_pose_ = true;
     }
 
-    // compensate initial heading ambiguity
-    const double hdg             = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
-    pose_transformed.orientation = mrs_lib::AttitudeConverter(pose_transformed.orientation).setHeading(hdg - init_hdg_);
-    pose_transformed.position    = rotatePointByHdg(pose_transformed.position, -init_hdg_);
+    tf2::doTransform(pose_transformed, pose_transformed, tf_msg);
   }
-  // TODO publish the initial offset to TF
-  geometry_msgs::TransformStamped tf_msg;
-  tf_msg.header.stamp = odom->header.stamp;
-  tf_msg.header.frame_id       = odom->header.frame_id;
-  tf_msg.child_frame_id        = odom_transformed.header.frame_id;
-  /* tf_msg.transform.translation = pointToVector3(pose_inv.position); */
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.rotation = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
 
-  /* if (noNans(tf_msg)) { */
-    try {
-      ROS_INFO_THROTTLE(1.0, "[UavPoseEstimator]: Publishing TF.");
-      broadcaster_->sendTransform(tf_msg);
-    }
-    catch (...) {
-      ROS_ERROR("[UavPoseEstimator]: Exception caught during publishing TF: %s - %s.", tf_msg.child_frame_id.c_str(), tf_msg.header.frame_id.c_str());
-    }
-  /* } else { */
-  /*   ROS_WARN_THROTTLE(1.0, "[UavPoseEstimator]: NaN detected in transform from %s to %s. Not publishing tf.", tf_msg.header.frame_id.c_str(), */
-  /*                     tf_msg.child_frame_id.c_str()); */
-  /* } */
+  // publish TF to the mrs_vins_world frame (rotated to make initial heading zero, if applicable)
+  tf::Transform transform_orig;
+  tf::transformMsgToTF(tf_msg.transform, transform_orig);
+  geometry_msgs::Transform inverted_transform_msg;
+  tf::transformTFToMsg(transform_orig.inverse(), inverted_transform_msg);
 
+  geometry_msgs::TransformStamped tf_msg_inv;
+  tf_msg_inv.header          = tf_msg.header;
+  tf_msg_inv.header.frame_id = tf_msg.child_frame_id;
+  tf_msg_inv.child_frame_id  = tf_msg.header.frame_id;
+  tf_msg_inv.transform       = inverted_transform_msg;
+
+  try {
+    ROS_INFO_THROTTLE(1.0, "[UavPoseEstimator]: Publishing TF.");
+    broadcaster_->sendTransform(tf_msg_inv);
+  }
+  catch (...) {
+    ROS_ERROR("[UavPoseEstimator]: Exception caught during publishing TF: %s - %s.", tf_msg.child_frame_id.c_str(), tf_msg.header.frame_id.c_str());
+  }
+
+  // save the transformed pose
   odom_transformed.pose.pose = pose_transformed;
-
 
   // transform velocity - linear and angular
   // if in body frame - rotate from IMU frame to FCU frame
@@ -330,7 +324,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   linear_velocity = odom->twist.twist.linear;
   Eigen::Vector3d v2;
   v2 << vins_velocity.vector.x, vins_velocity.vector.y, vins_velocity.vector.z;
-  v2                = rotation.transpose() * v2;
+  /* v2                = rotation.transpose() * v2; */
+  v2                = rotation * v2;
   linear_velocity.x = v2(0);
   linear_velocity.y = v2(1);
   linear_velocity.z = v2(2);
@@ -339,7 +334,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   angular_velocity = odom->twist.twist.angular;
   Eigen::Vector3d v3;
   v3 << vins_velocity.vector.x, vins_velocity.vector.y, vins_velocity.vector.z;
-  v3                 = rotation.transpose() * v3;
+  /* v3                 = rotation.transpose() * v3; */
+  v3                 = rotation * v3;
   angular_velocity.x = v3(0);
   angular_velocity.y = v3(1);
   angular_velocity.z = v3(2);
