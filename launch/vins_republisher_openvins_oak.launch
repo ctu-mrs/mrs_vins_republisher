@@ -27,9 +27,6 @@
   <group ns="$(arg UAV_NAME)">
 
       <!-- ================= Static transformations ================= -->
-    <!-- TF between the VINS world frame and MRS VINS world frame -->
-    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 -1.5708 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" /> -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_to_vins_origin" args="0.0 0.0 0.0 0.0 0.0 0.0 $(arg vins_world_frame) $(arg mrs_vins_world_frame)" />
 
     <!-- TF between the FCU of the UAV and the VINS body (IMU) frame -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="tf_vins_fcu_to_mrs_fcu" args="0.067 0.0 -0.33 3.1415 1.5708 0.0 $(arg fcu_frame) $(arg vins_fcu_front_frame)" />
@@ -46,7 +43,7 @@
       <param name="uav_name" value="$(arg UAV_NAME)"/>
 
       <!-- set to true if velocity is defined in the IMU frame -->
-      <param name="rotate_velocity" value="true"/>
+      <param name="velocity_in_body_frame" value="true"/>
 
       <remap from="~vins_odom_in" to="ov_msckf/odomimu"/>
       <remap from="~vins_odom_out" to="~odom"/>
