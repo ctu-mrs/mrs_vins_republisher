@@ -260,31 +260,52 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   odom_transformed.header          = odom->header;
   odom_transformed.header.frame_id = _mrs_vins_world_frame_;
 
-  // transform pose
+  /* transform pose */
   geometry_msgs::Pose pose_transformed;
-  // first transform it from IMU frame to FCU frame
-  // transform from the VINS body frame to the UAV FCU frame
-  auto res = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
-  if (!res) {
+
+  // Reference frames:
+  // IMU = VINS body frame
+  // FCU = MRS FCU frame (aligned with pixhawk IMU)
+  // GLOBAL = VINS world frame
+  // MRS = MRS world frame (created so that initial odometry heading is zero)
+  //
+  // VINS provides odometry corresponding to T^GLOBAL_IMU
+  // We want to get odometry corresponding to T^MRS_FCU
+  // So we do T^MRS_FCU = T^MRS_GLOBAL * T^GLOBAL_IMU * T^IMU_FCU
+  //
+  // (T^A_B represents transformation that transforms points from B to A)
+
+  // T^IMU_FCU - transforms points from FCU to IMU
+  auto T_IMU_FCU = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
+  if (!T_IMU_FCU) {
     ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(),
                       _vins_fcu_frame_.c_str());
     return;
   }
 
-  Eigen::Matrix3d rotation             = mrs_lib::AttitudeConverter(res.value().transform.rotation);
-  Eigen::Matrix3d original_orientation = mrs_lib::AttitudeConverter(odom->pose.pose.orientation);
-  pose_transformed.orientation         = mrs_lib::AttitudeConverter(original_orientation * rotation);
-  /* pose_transformed.orientation = mrs_lib::AttitudeConverter(rotation.transpose() * original_orientation.transpose()); */
-  Eigen::Vector3d t;
-  t << res.value().transform.translation.x, res.value().transform.translation.y, res.value().transform.translation.z;
-  Eigen::Vector3d translation = rotation.transpose() * t;
-  pose_transformed.position.x = odom->pose.pose.position.x + translation(0);
-  pose_transformed.position.y = odom->pose.pose.position.y + translation(1);
-  pose_transformed.position.z = odom->pose.pose.position.z + translation(2);
+  // R^IMU_FCU
+  Eigen::Matrix3d R_IMU_FCU = mrs_lib::AttitudeConverter(T_IMU_FCU.value().transform.rotation);
+
+  // R^GLOBAL_IMU = vio odometry orientation
+  Eigen::Matrix3d R_GLOBAL_IMU = mrs_lib::AttitudeConverter(odom->pose.pose.orientation);
+
+  // R^GLOBAL_FCU = R^GLOBAL_IMU * R^IMU_FCU
+  pose_transformed.orientation = mrs_lib::AttitudeConverter(R_GLOBAL_IMU * R_IMU_FCU);
+
+  // t^IMU_FCU
+  Eigen::Vector3d t_IMU_FCU;
+  t_IMU_FCU << T_IMU_FCU.value().transform.translation.x, T_IMU_FCU.value().transform.translation.y, T_IMU_FCU.value().transform.translation.z;
+
+  // t^GLOBAL_FCU = R^GLOBAL_IMU * t^IMU_FCU + t^GLOBAL_IMU
+  Eigen::Vector3d translation = R_GLOBAL_IMU * t_IMU_FCU;
+  pose_transformed.position.x = translation(0) + odom->pose.pose.position.x;
+  pose_transformed.position.y = translation(1) + odom->pose.pose.position.y;
+  pose_transformed.position.z = translation(2) + odom->pose.pose.position.z;
+
+  // pose_transformed is now T^GLOBAL_FCU
 
   // then subtract initial pose (global 4 DOF)
   // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
-  // TODO compensate position as well???
   if (_init_in_zero_) {
     if (!got_init_pose_) {
       init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
@@ -292,30 +313,41 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       got_init_pose_ = true;
     }
 
+    geometry_msgs::TransformStamped tf_msg;
+    tf_msg.header.stamp            = odom->header.stamp;
+    tf_msg.header.frame_id         = odom_transformed.header.frame_id;
+    tf_msg.child_frame_id          = odom->header.frame_id;
+    tf_msg.transform.translation.x = 0;
+    tf_msg.transform.translation.x = 0;
+    tf_msg.transform.translation.x = 0;
+    tf_msg.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(-init_hdg_);
+    tf2::doTransform(pose_transformed, pose_transformed, tf_msg);
+
+
     // compensate initial heading ambiguity
-    const double hdg             = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
-    pose_transformed.orientation = mrs_lib::AttitudeConverter(pose_transformed.orientation).setHeading(hdg - init_hdg_);
-    pose_transformed.position    = rotatePointByHdg(pose_transformed.position, -init_hdg_);
+    /* const double hdg             = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading(); */
+    /* pose_transformed.orientation = mrs_lib::AttitudeConverter(pose_transformed.orientation).setHeading(hdg - init_hdg_); */
+    /* pose_transformed.position    = rotatePointByHdg(pose_transformed.position, -init_hdg_); */
   }
   // TODO publish the initial offset to TF
   geometry_msgs::TransformStamped tf_msg;
-  tf_msg.header.stamp = odom->header.stamp;
-  tf_msg.header.frame_id       = odom->header.frame_id;
-  tf_msg.child_frame_id        = odom_transformed.header.frame_id;
+  tf_msg.header.stamp    = odom->header.stamp;
+  tf_msg.header.frame_id = odom->header.frame_id;
+  tf_msg.child_frame_id  = odom_transformed.header.frame_id;
   /* tf_msg.transform.translation = pointToVector3(pose_inv.position); */
   tf_msg.transform.translation.x = 0;
   tf_msg.transform.translation.x = 0;
   tf_msg.transform.translation.x = 0;
-  tf_msg.transform.rotation = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
+  tf_msg.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
 
   /* if (noNans(tf_msg)) { */
-    try {
-      ROS_INFO_THROTTLE(1.0, "[UavPoseEstimator]: Publishing TF.");
-      broadcaster_->sendTransform(tf_msg);
-    }
-    catch (...) {
-      ROS_ERROR("[UavPoseEstimator]: Exception caught during publishing TF: %s - %s.", tf_msg.child_frame_id.c_str(), tf_msg.header.frame_id.c_str());
-    }
+  try {
+    ROS_INFO_THROTTLE(1.0, "[UavPoseEstimator]: Publishing TF.");
+    broadcaster_->sendTransform(tf_msg);
+  }
+  catch (...) {
+    ROS_ERROR("[UavPoseEstimator]: Exception caught during publishing TF: %s - %s.", tf_msg.child_frame_id.c_str(), tf_msg.header.frame_id.c_str());
+  }
   /* } else { */
   /*   ROS_WARN_THROTTLE(1.0, "[UavPoseEstimator]: NaN detected in transform from %s to %s. Not publishing tf.", tf_msg.header.frame_id.c_str(), */
   /*                     tf_msg.child_frame_id.c_str()); */
@@ -323,14 +355,13 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   odom_transformed.pose.pose = pose_transformed;
 
-
   // transform velocity - linear and angular
   // if in body frame - rotate from IMU frame to FCU frame
   geometry_msgs::Vector3 linear_velocity;
   linear_velocity = odom->twist.twist.linear;
   Eigen::Vector3d v2;
   v2 << vins_velocity.vector.x, vins_velocity.vector.y, vins_velocity.vector.z;
-  v2                = rotation.transpose() * v2;
+  v2                = R_IMU_FCU.transpose() * v2;
   linear_velocity.x = v2(0);
   linear_velocity.y = v2(1);
   linear_velocity.z = v2(2);
@@ -339,7 +370,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   angular_velocity = odom->twist.twist.angular;
   Eigen::Vector3d v3;
   v3 << vins_velocity.vector.x, vins_velocity.vector.y, vins_velocity.vector.z;
-  v3                 = rotation.transpose() * v3;
+  v3                 = R_IMU_FCU.transpose() * v3;
   angular_velocity.x = v3(0);
   angular_velocity.y = v3(1);
   angular_velocity.z = v3(2);
