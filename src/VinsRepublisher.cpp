@@ -3,10 +3,12 @@
 #include <ros/ros.h>
 
 #include <tf2/LinearMath/Quaternion.h>
+#include <tf2/convert.h>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <geometry_msgs/PoseWithCovariance.h>
 #include <geometry_msgs/TwistWithCovarianceStamped.h>
 #include <geometry_msgs/Vector3.h>
 #include <nav_msgs/Odometry.h>
@@ -46,8 +48,7 @@ private:
 
   /* ros parameters */
   std::string _uav_name_;
-  bool        _rotate_velocity_ = false;
-  /* std::string _camera_frame_; */
+  bool        _velocity_in_body_frame_ = true;
   std::string _fcu_frame_;
   std::string _mrs_vins_world_frame_;
   std::string _vins_fcu_frame_;
@@ -57,7 +58,9 @@ private:
   bool   got_init_pose_ = false;
   double init_hdg_;
 
-  bool validateOdometry(const nav_msgs::Odometry &odometry);
+  bool                                                validateOdometry(const nav_msgs::Odometry &odometry);
+  geometry_msgs::PoseWithCovariance::_covariance_type transformCovariance(const geometry_msgs::PoseWithCovariance::_covariance_type &cov_in,
+                                                                          const tf2::Transform &                                     transform);
 
   // | ------------------------ callbacks ----------------------- |
   ros::Subscriber subscriber_vins_;
@@ -96,7 +99,7 @@ void VinsRepublisher::onInit() {
   mrs_lib::ParamLoader param_loader(nh_, node_name);
 
   param_loader.loadParam("uav_name", _uav_name_);
-  param_loader.loadParam("rotate_velocity", _rotate_velocity_);
+  param_loader.loadParam("velocity_in_body_frame", _velocity_in_body_frame_);
   param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
   param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
   if (_rate_limiter_rate_ <= 1e-3) {
@@ -105,7 +108,6 @@ void VinsRepublisher::onInit() {
   }
 
   param_loader.loadParam("fcu_frame", _fcu_frame_);
-  /* param_loader.loadParam("camera_frame", _camera_frame_); */
   param_loader.loadParam("mrs_vins_world_frame", _mrs_vins_world_frame_);
   param_loader.loadParam("vins_fcu_frame", _vins_fcu_frame_);
 
@@ -263,7 +265,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  /* transform pose *//*//{*/
+  /* transform pose with covariance */ /*//{*/
   geometry_msgs::Pose pose_transformed;
 
   // R^IMU_FCU
@@ -287,8 +289,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   // pose_transformed is now T^GLOBAL_FCU
 
-  // then subtract initial pose (global 4 DOF)
   // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
+  geometry_msgs::TransformStamped tf_msg;
   if (_init_in_zero_) {
     if (!got_init_pose_) {
       init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
@@ -296,7 +298,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       got_init_pose_ = true;
     }
 
-    geometry_msgs::TransformStamped tf_msg;
+    // T^MRS_GLOBAL
     tf_msg.header.stamp            = odom->header.stamp;
     tf_msg.header.frame_id         = odom_transformed.header.frame_id;
     tf_msg.child_frame_id          = odom->header.frame_id;
@@ -308,61 +310,67 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     // obtain T^MRS_FCU
     tf2::doTransform(pose_transformed, pose_transformed, tf_msg);
 
-    Eigen::Matrix3d R_MRS_GLOBAL = mrs_lib::AttitudeConverter(tf_msg.transform.rotation);
+    // transform covariance
+    // pose covariance is in world frame coordinates (in GLOBAL frame)
+    // TODO is the orientation covariance also in world frame?
 
-    /* Eigen::Matrix3d R_MRS_GLOBAL2; */
-    /* R_MRS_GLOBAL2 << cos(-init_hdg_), -sin(-init_hdg_), 0, sin(-init_hdg_), cos(-init_hdg_), 0, 0, 0, 1; */
-
+    // obtain transformed covariance as R^MRS_GLOBAL * covariance * (R^MRS_GLOBAL)^T where covariance is each 3x3 block of the 6x6 covariance matrix
+    /* tf2::Stamped<tf2::Transform> tf; */
+    tf2::Transform tf;
+    tf2::fromMsg(tf_msg.transform, tf);
+    odom_transformed.pose.covariance = transformCovariance(odom->pose.covariance, tf);
+  } else {
+    odom_transformed.pose.covariance = odom->pose.covariance;
   }
 
   // publish the initial offset to TF - T^GLOBAL_MRS
-  geometry_msgs::TransformStamped tf_msg;
-  tf_msg.header.stamp    = odom->header.stamp;
-  tf_msg.header.frame_id = odom->header.frame_id;
-  tf_msg.child_frame_id  = odom_transformed.header.frame_id;
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.translation.x = 0;
-  tf_msg.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
+  geometry_msgs::TransformStamped tf_msg_inv;
+  tf_msg_inv.header.stamp            = odom->header.stamp;
+  tf_msg_inv.header.frame_id         = odom->header.frame_id;
+  tf_msg_inv.child_frame_id          = odom_transformed.header.frame_id;
+  tf_msg_inv.transform.translation.x = 0;
+  tf_msg_inv.transform.translation.x = 0;
+  tf_msg_inv.transform.translation.x = 0;
+  tf_msg_inv.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
 
   try {
-    ROS_INFO_THROTTLE(1.0, "[UavPoseEstimator]: Publishing TF.");
-    broadcaster_->sendTransform(tf_msg);
+    broadcaster_->sendTransform(tf_msg_inv);
   }
   catch (...) {
-    ROS_ERROR("[UavPoseEstimator]: Exception caught during publishing TF: %s - %s.", tf_msg.child_frame_id.c_str(), tf_msg.header.frame_id.c_str());
+    ROS_ERROR("[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
   }
 
   odom_transformed.pose.pose = pose_transformed;
-/*//}*/
+  /*//}*/
 
-  /* transform velocity - linear and angular *//*//{*/
-  // if in body frame - rotate from IMU frame to FCU frame
-  geometry_msgs::Vector3 linear_velocity = odom->twist.twist.linear;
-  Eigen::Vector3d v2;
-  v2 << linear_velocity.x, linear_velocity.y, linear_velocity.z;
-  v2                = R_IMU_FCU.transpose() * v2;
-  linear_velocity.x = v2(0);
-  linear_velocity.y = v2(1);
-  linear_velocity.z = v2(2);
-
+  /* transform velocity - linear and angular */ /*//{*/
+  geometry_msgs::Vector3 linear_velocity  = odom->twist.twist.linear;
   geometry_msgs::Vector3 angular_velocity = odom->twist.twist.angular;
-  Eigen::Vector3d v3;
-  v3 << angular_velocity.x, angular_velocity.y, angular_velocity.z;
-  v3                 = R_IMU_FCU.transpose() * v3;
-  angular_velocity.x = v3(0);
-  angular_velocity.y = v3(1);
-  angular_velocity.z = v3(2);
+  if (_velocity_in_body_frame_) {
+    // if in body frame - rotate from IMU frame to FCU frame
+    Eigen::Vector3d v2;
+    v2 << linear_velocity.x, linear_velocity.y, linear_velocity.z;
+    v2                = R_IMU_FCU.transpose() * v2;
+    linear_velocity.x = v2(0);
+    linear_velocity.y = v2(1);
+    linear_velocity.z = v2(2);
 
-  // TODO if in global frame, apply initial TF offset
-
+    Eigen::Vector3d v3;
+    v3 << angular_velocity.x, angular_velocity.y, angular_velocity.z;
+    v3                 = R_IMU_FCU.transpose() * v3;
+    angular_velocity.x = v3(0);
+    angular_velocity.y = v3(1);
+    angular_velocity.z = v3(2);
+  } else {
+    if (_init_in_zero_) {
+      // if in global frame, apply initial TF offset
+      tf2::doTransform(linear_velocity, linear_velocity, tf_msg);
+      tf2::doTransform(angular_velocity, angular_velocity, tf_msg);
+    }
+  }
   odom_transformed.twist.twist.linear  = linear_velocity;
   odom_transformed.twist.twist.angular = angular_velocity;
-/*//}*/
-
-  // transform covariance - apparently translation is in world frame and rotation is in body frame with fixed axes???
-  // if so, apply initial TF offset to translation part and IMU to FCU TF to rotation part??? + twist covariance...
-
+  /*//}*/
 
   // publish
   if (!validateOdometry(odom_transformed)) {
@@ -378,10 +386,87 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   catch (...) {
     ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
   }
-
 }
 
 //}
+
+/* transformCovariance() */ /*//{*/
+// taken from https://github.com/ros/geometry2/blob/noetic-devel/tf2_geometry_msgs/include/tf2_geometry_msgs/tf2_geometry_msgs.h
+// copied here, so that it's clear what it does right away
+geometry_msgs::PoseWithCovariance::_covariance_type VinsRepublisher::transformCovariance(const geometry_msgs::PoseWithCovariance::_covariance_type &cov_in,
+                                                                                         const tf2::Transform &                                     transform) {
+  /**
+   * To transform a covariance matrix:
+   *
+   * [R 0] COVARIANCE [R' 0 ]
+   * [0 R]            [0  R']
+   *
+   * Where:
+   * 	R is the rotation matrix (3x3).
+   * 	R' is the transpose of the rotation matrix.
+   * 	COVARIANCE is the 6x6 covariance matrix to be transformed.
+   */
+
+  // get rotation matrix transpose
+  const tf2::Matrix3x3 R_transpose = transform.getBasis().transpose();
+
+  // convert the covariance matrix into four 3x3 blocks
+  const tf2::Matrix3x3 cov_11(cov_in[0], cov_in[1], cov_in[2], cov_in[6], cov_in[7], cov_in[8], cov_in[12], cov_in[13], cov_in[14]);
+  const tf2::Matrix3x3 cov_12(cov_in[3], cov_in[4], cov_in[5], cov_in[9], cov_in[10], cov_in[11], cov_in[15], cov_in[16], cov_in[17]);
+  const tf2::Matrix3x3 cov_21(cov_in[18], cov_in[19], cov_in[20], cov_in[24], cov_in[25], cov_in[26], cov_in[30], cov_in[31], cov_in[32]);
+  const tf2::Matrix3x3 cov_22(cov_in[21], cov_in[22], cov_in[23], cov_in[27], cov_in[28], cov_in[29], cov_in[33], cov_in[34], cov_in[35]);
+
+  // perform blockwise matrix multiplication
+  const tf2::Matrix3x3 result_11 = transform.getBasis() * cov_11 * R_transpose;
+  const tf2::Matrix3x3 result_12 = transform.getBasis() * cov_12 * R_transpose;
+  const tf2::Matrix3x3 result_21 = transform.getBasis() * cov_21 * R_transpose;
+  const tf2::Matrix3x3 result_22 = transform.getBasis() * cov_22 * R_transpose;
+
+  // form the output
+  geometry_msgs::PoseWithCovariance::_covariance_type output;
+  output[0]  = result_11[0][0];
+  output[1]  = result_11[0][1];
+  output[2]  = result_11[0][2];
+  output[6]  = result_11[1][0];
+  output[7]  = result_11[1][1];
+  output[8]  = result_11[1][2];
+  output[12] = result_11[2][0];
+  output[13] = result_11[2][1];
+  output[14] = result_11[2][2];
+
+  output[3]  = result_12[0][0];
+  output[4]  = result_12[0][1];
+  output[5]  = result_12[0][2];
+  output[9]  = result_12[1][0];
+  output[10] = result_12[1][1];
+  output[11] = result_12[1][2];
+  output[15] = result_12[2][0];
+  output[16] = result_12[2][1];
+  output[17] = result_12[2][2];
+
+  output[18] = result_21[0][0];
+  output[19] = result_21[0][1];
+  output[20] = result_21[0][2];
+  output[24] = result_21[1][0];
+  output[25] = result_21[1][1];
+  output[26] = result_21[1][2];
+  output[30] = result_21[2][0];
+  output[31] = result_21[2][1];
+  output[32] = result_21[2][2];
+
+  output[21] = result_22[0][0];
+  output[22] = result_22[0][1];
+  output[23] = result_22[0][2];
+  output[27] = result_22[1][0];
+  output[28] = result_22[1][1];
+  output[29] = result_22[1][2];
+  output[33] = result_22[2][0];
+  output[34] = result_22[2][1];
+  output[35] = result_22[2][2];
+
+  return output;
+}
+/*//}*/
 
 }  // namespace vins_republisher
 /* every nodelet must export its class as nodelet plugin */
