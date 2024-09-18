@@ -5,9 +5,9 @@
   <arg name="camera_pitch" default="0.0"/>
 
   <arg name="mrs_vins_world_frame" default="$(arg UAV_NAME)/mrs_vins_world"/>
-  <arg name="vins_world_frame" default="global"/>
+  <arg name="vins_world_frame" default="$(arg UAV_NAME)/ov_global"/>
   <arg name="fcu_frame" default="$(arg UAV_NAME)/fcu"/>
-  <arg name="vins_fcu_frame" default="imu"/>
+  <arg name="vins_fcu_frame" default="$(arg UAV_NAME)/ov_imu"/>
   <arg name="vins_fcu_front_frame" default="$(arg UAV_NAME)/vins_body_front"/>
 
   <!-- will it run using GNU debugger? -->
