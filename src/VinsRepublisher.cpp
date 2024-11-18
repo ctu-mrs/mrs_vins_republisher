@@ -75,6 +75,7 @@ private:
   bool            is_averaging_finished_ = false;
   int             n_imu_meas_            = 0;
   Eigen::Vector3d mean_acc_;
+  Eigen::Matrix3d init_rot_;
 
   ros::Publisher publisher_odom_;
   ros::Time      publisher_odom_last_published_;
@@ -152,7 +153,7 @@ void VinsRepublisher::onInit() {
 
   subscriber_vins_ = nh_.subscribe("vins_odom_in", 10, &VinsRepublisher::odometryCallback, this, ros::TransportHints().tcpNoDelay());
   if (align_gravity_enabled_) {
-    subscriber_imu_  = nh_.subscribe("imu_in", 10, &VinsRepublisher::imuCallback, this, ros::TransportHints().tcpNoDelay());
+    subscriber_imu_ = nh_.subscribe("imu_in", 10, &VinsRepublisher::imuCallback, this, ros::TransportHints().tcpNoDelay());
   }
 
   // | ----------------------- publishers ----------------------- |
@@ -408,19 +409,26 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  if (!align_gravity_enabled_ || is_calibrated_) {
-    try {
-      publisher_odom_.publish(odom_transformed);
-      ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
-      publisher_odom_last_published_ = ros::Time::now();
+  if (align_gravity_enabled_) {
+    if (is_calibrated_) {
+      // TODO transform
+    } else {
+      if (!is_averaging_) {
+        has_valid_odom_ = true;
+        mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
+        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: received valid odom, waiting for calibration service call");
+      }
+      return;
     }
-    catch (...) {
-      ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
-    }
-  } else {
-    has_valid_odom_ = true;
-    mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
-    ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: received valid odom, waiting for calibration service call");
+  }
+
+  try {
+    publisher_odom_.publish(odom_transformed);
+    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
+    publisher_odom_last_published_ = ros::Time::now();
+  }
+  catch (...) {
+    ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
   }
 }
 
@@ -563,7 +571,7 @@ bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_
   double align_cos                  = g_vec.transpose() * mean_acc;
   align_cos                         = align_cos / g_vec.norm() / mean_acc.norm();
   const Eigen::Vector3d align_angle = g_cross_mat * mean_acc / (g_cross_mat * mean_acc).norm() * std::acos(align_cos);
-  const Eigen::Matrix3d rot         = Exp(align_angle);
+  init_rot_                         = Exp(align_angle);
 
   res.success = true;
   res.message = "calibrated";
