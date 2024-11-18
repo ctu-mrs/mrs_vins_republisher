@@ -14,6 +14,9 @@
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/String.h>
 
+#include <sensor_msgs/Imu.h>
+#include <std_srvs/SetBool.h>
+
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
@@ -66,13 +69,31 @@ private:
   ros::Subscriber subscriber_vins_;
   void            odometryCallback(const nav_msgs::OdometryConstPtr &odom);
 
+  ros::Subscriber subscriber_imu_;
+  void            imuCallback(const sensor_msgs::ImuConstPtr &odom);
+  bool            is_averaging_          = false;
+  bool            is_averaging_finished_ = false;
+  int             n_imu_meas_            = 0;
+  Eigen::Vector3d mean_acc_;
+
   ros::Publisher publisher_odom_;
   ros::Time      publisher_odom_last_published_;
+
+  ros::ServiceServer srvs_calibrate_;
+  bool               align_gravity_enabled_;
+  bool               calibrateSrvCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
+  bool               is_calibrated_  = false;
+  bool               has_valid_odom_ = false;
+  nav_msgs::Odometry odom_init_;
+  std::mutex         mtx_odom_init_;
 
   /* transformation handler */
   mrs_lib::Transformer transformer_;
 
   std::shared_ptr<mrs_lib::TransformBroadcaster> broadcaster_;
+
+  Eigen::Matrix3d Exp(const Eigen::Vector3d &ang);
+  Eigen::Matrix3d skewSymmetricMatrix(const Eigen::Vector3d &vec);
 };
 
 //}
@@ -92,6 +113,8 @@ void VinsRepublisher::onInit() {
   ros::Time::waitForValid();
 
   publisher_odom_last_published_ = ros::Time(0);
+
+  mean_acc_ << 0, 0, 0;
 
   // | ---------- loading ros parameters using mrs_lib ---------- |
   ROS_INFO("[%s]: loading parameters using ParamLoader", node_name.c_str());
@@ -113,6 +136,8 @@ void VinsRepublisher::onInit() {
 
   param_loader.loadParam("init_in_zero", _init_in_zero_, true);
 
+  param_loader.loadParam("gravity_alignment", align_gravity_enabled_, false);
+
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
     ros::shutdown();
@@ -126,10 +151,17 @@ void VinsRepublisher::onInit() {
   // | ----------------------- subscribers ---------------------- |
 
   subscriber_vins_ = nh_.subscribe("vins_odom_in", 10, &VinsRepublisher::odometryCallback, this, ros::TransportHints().tcpNoDelay());
+  if (align_gravity_enabled_) {
+    subscriber_imu_  = nh_.subscribe("imu_in", 10, &VinsRepublisher::imuCallback, this, ros::TransportHints().tcpNoDelay());
+  }
 
   // | ----------------------- publishers ----------------------- |
 
   publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 10);
+
+  if (align_gravity_enabled_) {
+    srvs_calibrate_ = nh_.advertiseService("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback, this);
+  }
 
   is_initialized_ = true;
 
@@ -238,8 +270,6 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     ROS_DEBUG("[%s]: skipping over", ros::this_node::getName().c_str());
     return;
   }
-
-  ROS_DEBUG("[%s]: publishing", ros::this_node::getName().c_str());
 
   nav_msgs::Odometry odom_transformed;
   odom_transformed.header          = odom->header;
@@ -378,17 +408,49 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  try {
-    publisher_odom_.publish(odom_transformed);
-    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
-    publisher_odom_last_published_ = ros::Time::now();
-  }
-  catch (...) {
-    ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
+  if (!align_gravity_enabled_ || is_calibrated_) {
+    try {
+      publisher_odom_.publish(odom_transformed);
+      ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
+      publisher_odom_last_published_ = ros::Time::now();
+    }
+    catch (...) {
+      ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
+    }
+  } else {
+    has_valid_odom_ = true;
+    mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
+    ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: received valid odom, waiting for calibration service call");
   }
 }
 
 //}
+
+/*//{ imuCallback() */
+void VinsRepublisher::imuCallback(const sensor_msgs::ImuConstPtr &msg) {
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  if (is_calibrated_) {
+    // TODO unsubscribe imu
+    return;
+  }
+
+  if (is_averaging_) {
+    Eigen::Vector3d acc;
+    acc << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
+    n_imu_meas_++;
+    mean_acc_ += (acc - mean_acc_) / n_imu_meas_;
+    if (n_imu_meas_ > 500) {
+      ROS_INFO("[VinsRepublisher]: IMU acceleration vector averaged as (%.2f, %.2f, %.2f)", mean_acc_(0), mean_acc_(1), mean_acc_(2));
+      is_averaging_          = false;
+      is_averaging_finished_ = true;
+    }
+  }
+}
+/*//}*/
 
 /* transformCovariance() */ /*//{*/
 // taken from https://github.com/ros/geometry2/blob/noetic-devel/tf2_geometry_msgs/include/tf2_geometry_msgs/tf2_geometry_msgs.h
@@ -465,6 +527,72 @@ geometry_msgs::PoseWithCovariance::_covariance_type VinsRepublisher::transformCo
   output[35] = result_22[2][2];
 
   return output;
+}
+/*//}*/
+
+/*//{ calibrateSrvCallback() */
+bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res) {
+
+  if (!has_valid_odom_) {
+    ROS_ERROR("[%s]: service for calibration called before obtaining valid odom.", getName().c_str());
+    return false;
+  }
+
+  const nav_msgs::Odometry odom_init = mrs_lib::get_mutexed(mtx_odom_init_, odom_init_);
+  /* const Eigen::Quaternion q_init = mrs_lib::AttitudeConverter(odom_init.pose.pose.orientation); */
+  /* pos_init_ = odom_init.pose.pose.position; */
+  /* rot_init_ = mrs_lib::AttitudeConverter(odom_init.pose.pose.orientation); */
+
+  Eigen::Vector3d mean_acc;
+  is_averaging_ = true;
+  for (int i = 0; i < 10; i++) {
+    ROS_INFO("[VinsRepublisher]: waiting for accel averaging to finish");
+    if (is_averaging_finished_) {
+      mean_acc = mean_acc_;
+      break;
+    }
+    ros::Duration(1.0).sleep();
+  }
+
+
+  const double    g = 9.81;
+  Eigen::Vector3d g_vec;
+  g_vec << 0, 0, -g;
+  Eigen::Matrix3d g_cross_mat;
+  g_cross_mat << 0.0, g_vec(2), -g_vec(1), -g_vec(2), 0.0, g_vec(0), g_vec(1), -g_vec(0), 0.0;
+  double align_cos                  = g_vec.transpose() * mean_acc;
+  align_cos                         = align_cos / g_vec.norm() / mean_acc.norm();
+  const Eigen::Vector3d align_angle = g_cross_mat * mean_acc / (g_cross_mat * mean_acc).norm() * std::acos(align_cos);
+  const Eigen::Matrix3d rot         = Exp(align_angle);
+
+  res.success = true;
+  res.message = "calibrated";
+
+  is_calibrated_ = true;
+
+  return true;
+}
+/*//}*/
+
+/*//{ Exp() */
+Eigen::Matrix3d VinsRepublisher::Exp(const Eigen::Vector3d &ang) {
+  const double ang_norm = ang.norm();
+
+  if (ang_norm < 0.0000001) {
+    return Eigen::Matrix3d::Identity();
+  } else {
+    const Eigen::Vector3d rot_axis = ang / ang_norm;
+    const Eigen::Matrix3d m_skew   = skewSymmetricMatrix(rot_axis);
+    return Eigen::Matrix3d::Identity() + std::sin(ang_norm) * m_skew + (1.0 - std::cos(ang_norm)) * m_skew * m_skew;
+  }
+}
+/*//}*/
+
+/*//{ skewSymmetricMatrix() */
+Eigen::Matrix3d VinsRepublisher::skewSymmetricMatrix(const Eigen::Vector3d &vec) {
+  Eigen::Matrix3d m_skew;
+  m_skew << 0.0, vec(2), -vec(1), -vec(2), 0.0, vec(0), vec(1), -vec(0), 0.0;
+  return m_skew;
 }
 /*//}*/
 
