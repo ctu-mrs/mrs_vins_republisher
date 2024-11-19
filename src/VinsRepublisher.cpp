@@ -81,7 +81,7 @@ private:
   ros::Time      publisher_odom_last_published_;
 
   ros::ServiceServer srvs_calibrate_;
-  bool               align_gravity_enabled_;
+  bool               compensate_initial_tilt_;
   bool               calibrateSrvCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   bool               is_calibrated_  = false;
   bool               has_valid_odom_ = false;
@@ -137,7 +137,7 @@ void VinsRepublisher::onInit() {
 
   param_loader.loadParam("init_in_zero", _init_in_zero_, true);
 
-  param_loader.loadParam("gravity_alignment", align_gravity_enabled_, false);
+  param_loader.loadParam("compensate_initial_tilt_", compensate_initial_tilt_, false);
 
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
@@ -152,15 +152,12 @@ void VinsRepublisher::onInit() {
   // | ----------------------- subscribers ---------------------- |
 
   subscriber_vins_ = nh_.subscribe("vins_odom_in", 10, &VinsRepublisher::odometryCallback, this, ros::TransportHints().tcpNoDelay());
-  if (align_gravity_enabled_) {
-    subscriber_imu_ = nh_.subscribe("imu_in", 10, &VinsRepublisher::imuCallback, this, ros::TransportHints().tcpNoDelay());
-  }
 
   // | ----------------------- publishers ----------------------- |
 
   publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 10);
 
-  if (align_gravity_enabled_) {
+  if (compensate_initial_tilt_) {
     srvs_calibrate_ = nh_.advertiseService("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback, this);
   }
 
@@ -409,16 +406,30 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-  if (align_gravity_enabled_) {
+  if (compensate_initial_tilt_) {
     if (is_calibrated_) {
-      // TODO transform
+      
+      // First subtract the initial position in the initialization frame
+      odom_transformed.pose.pose.position.x =- odom_init_.pose.pose.position.x;
+      odom_transformed.pose.pose.position.y =- odom_init_.pose.pose.position.y;
+      odom_transformed.pose.pose.position.z =- odom_init_.pose.pose.position.z;
+
+      // Rotate position to the calibrated frame
+      Eigen::Vector3d pos;
+      pos << odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z;
+      pos = init_rot_.inverse() * pos;
+      
+
+      const Eigen::Quaterniond q_init_rot = mrs_lib::AttitudeConverter(init_rot_);
+      const Eigen::Quaterniond q_curr_rot = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation);
+      const Eigen::Quaterniond q_calibrated = q_init_rot * q_curr_rot;
+
+      odom_transformed.pose.pose.orientation = mrs_lib::AttitudeConverter(q_calibrated);
+
     } else {
-      if (!is_averaging_) {
-        has_valid_odom_ = true;
         mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
         ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: received valid odom, waiting for calibration service call");
-      }
-      return;
+        return;
     }
   }
 
@@ -433,32 +444,6 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 }
 
 //}
-
-/*//{ imuCallback() */
-void VinsRepublisher::imuCallback(const sensor_msgs::ImuConstPtr &msg) {
-
-  if (!is_initialized_) {
-    return;
-  }
-
-  if (is_calibrated_) {
-    // TODO unsubscribe imu
-    return;
-  }
-
-  if (is_averaging_) {
-    Eigen::Vector3d acc;
-    acc << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
-    n_imu_meas_++;
-    mean_acc_ += (acc - mean_acc_) / n_imu_meas_;
-    if (n_imu_meas_ > 500) {
-      ROS_INFO("[VinsRepublisher]: IMU acceleration vector averaged as (%.2f, %.2f, %.2f)", mean_acc_(0), mean_acc_(1), mean_acc_(2));
-      is_averaging_          = false;
-      is_averaging_finished_ = true;
-    }
-  }
-}
-/*//}*/
 
 /* transformCovariance() */ /*//{*/
 // taken from https://github.com/ros/geometry2/blob/noetic-devel/tf2_geometry_msgs/include/tf2_geometry_msgs/tf2_geometry_msgs.h
@@ -546,32 +531,7 @@ bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_
     return false;
   }
 
-  const nav_msgs::Odometry odom_init = mrs_lib::get_mutexed(mtx_odom_init_, odom_init_);
-  /* const Eigen::Quaternion q_init = mrs_lib::AttitudeConverter(odom_init.pose.pose.orientation); */
-  /* pos_init_ = odom_init.pose.pose.position; */
-  /* rot_init_ = mrs_lib::AttitudeConverter(odom_init.pose.pose.orientation); */
-
-  Eigen::Vector3d mean_acc;
-  is_averaging_ = true;
-  for (int i = 0; i < 10; i++) {
-    ROS_INFO("[VinsRepublisher]: waiting for accel averaging to finish");
-    if (is_averaging_finished_) {
-      mean_acc = mean_acc_;
-      break;
-    }
-    ros::Duration(1.0).sleep();
-  }
-
-
-  const double    g = 9.81;
-  Eigen::Vector3d g_vec;
-  g_vec << 0, 0, -g;
-  Eigen::Matrix3d g_cross_mat;
-  g_cross_mat << 0.0, g_vec(2), -g_vec(1), -g_vec(2), 0.0, g_vec(0), g_vec(1), -g_vec(0), 0.0;
-  double align_cos                  = g_vec.transpose() * mean_acc;
-  align_cos                         = align_cos / g_vec.norm() / mean_acc.norm();
-  const Eigen::Vector3d align_angle = g_cross_mat * mean_acc / (g_cross_mat * mean_acc).norm() * std::acos(align_cos);
-  init_rot_                         = Exp(align_angle);
+  ROS_INFO("[%s]: calibrating level horizon.", getName().c_str());
 
   res.success = true;
   res.message = "calibrated";
