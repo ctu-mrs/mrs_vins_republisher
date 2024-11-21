@@ -419,7 +419,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       pos << odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z;
       pos = init_rot_.inverse() * pos;
       
-
+      // Unrotate orientation
       const Eigen::Quaterniond q_init_rot = mrs_lib::AttitudeConverter(init_rot_);
       const Eigen::Quaterniond q_curr_rot = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation);
       const Eigen::Quaterniond q_calibrated = q_init_rot * q_curr_rot;
@@ -428,7 +428,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
     } else {
         mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
-        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: received valid odom, waiting for calibration service call");
+        auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
+        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg], waiting for calibration service call", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll, pitch, yaw);
         return;
     }
   }
@@ -532,6 +533,8 @@ bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_
   }
 
   ROS_INFO("[%s]: calibrating level horizon.", getName().c_str());
+  auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
+  ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll, pitch, yaw);
 
   res.success = true;
   res.message = "calibrated";
