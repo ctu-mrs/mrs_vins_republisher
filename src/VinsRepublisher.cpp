@@ -388,23 +388,44 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     angular_velocity.x = v3(0);
     angular_velocity.y = v3(1);
     angular_velocity.z = v3(2);
-  } else {
-    if (_init_in_zero_) {
+
+    } else {
+    /* if (_init_in_zero_) { */
       // if in global frame, apply initial TF offset
-      tf2::doTransform(linear_velocity, linear_velocity, tf_msg);
-      tf2::doTransform(angular_velocity, angular_velocity, tf_msg);
-    }
+      /* tf2::doTransform(linear_velocity, linear_velocity, tf_msg); */
+      /* tf2::doTransform(angular_velocity, angular_velocity, tf_msg); */
+    /* } */
+
+    // if in global frame - rotate from GLOBAL frame to FCU frame
+    // R^GLOBAL_FCU = R^GLOBAL_IMU * R^IMU_FCU
+    Eigen::Matrix3d R_GLOBAL_FCU = mrs_lib::AttitudeConverter(R_GLOBAL_IMU * R_IMU_FCU);
+    Eigen::Vector3d v2;
+    v2 << linear_velocity.x, linear_velocity.y, linear_velocity.z;
+    v2                = R_GLOBAL_FCU.transpose() * v2;
+    linear_velocity.x = v2(0);
+    linear_velocity.y = v2(1);
+    linear_velocity.z = v2(2);
+
+    Eigen::Vector3d v3;
+    v3 << angular_velocity.x, angular_velocity.y, angular_velocity.z;
+    v3                 = R_GLOBAL_FCU.transpose() * v3;
+    angular_velocity.x = v3(0);
+    angular_velocity.y = v3(1);
+    angular_velocity.z = v3(2);
   }
+
   odom_transformed.twist.twist.linear  = linear_velocity;
   odom_transformed.twist.twist.angular = angular_velocity;
+
   /*//}*/
 
-  // publish
+  // validate
   if (!validateOdometry(odom_transformed)) {
     ROS_ERROR("[VinsRepublisher]: transformed odometry is not numerically valid");
     return;
   }
 
+/*//{ compensate initial tilt */
   if (compensate_initial_tilt_) {
     if (is_calibrated_) {
       
@@ -429,12 +450,14 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     } else {
         mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
         auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
-        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg], waiting for calibration service call", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll*180/3.14, pitch*180/3.14, yaw*180/3.14);
+        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg], waiting for calibration service call", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll*180/3.14, pitch*180/3.14, yaw*180/3.14);
         has_valid_odom_ = true;
         return;
     }
   }
+/*//}*/
 
+  // publish
   try {
     publisher_odom_.publish(odom_transformed);
     ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
