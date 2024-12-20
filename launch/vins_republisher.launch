@@ -40,8 +40,6 @@
       <rosparam file="$(find mrs_vins_republisher)/config/default.yaml" command="load" />
 
       <param name="uav_name" value="$(arg UAV_NAME)"/>
-      <!-- set to true if velocity is defined in the IMU frame -->
-      <param name="velocity_in_body_frame" value="false"/>
 
       <remap from="~vins_odom_in" to="vins_estimator/imu_propagate"/>
       <remap from="~vins_odom_out" to="~odom"/>

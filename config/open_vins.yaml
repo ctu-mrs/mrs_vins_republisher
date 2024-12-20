@@ -1,6 +1,6 @@
 # OpenVins publishes velocities in body frame (some other algorithms don't)
 # When false, republisher will transform velocities in global (vins, navigation, world) frame into body frame
-velocity_in_body_frame: false
+velocity_in_body_frame: true
 
 # Subtract the first heading from all msgs so that the origin is in zero (OpenVINS sometimes starts rotated by pi/2)
 init_in_zero: true
@@ -12,5 +12,5 @@ compensate_initial_tilt: false
 # limits the processing to this rate (the real rate will be typically slightly lower)
 # disable to keep processing at camera FPS
 rate_limiter:
-  enabled: true
+  enabled: false
   max_rate: 100.0 # [Hz]
