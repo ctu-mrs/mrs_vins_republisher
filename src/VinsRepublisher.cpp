@@ -389,11 +389,11 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     angular_velocity.y = v3(1);
     angular_velocity.z = v3(2);
 
-    } else {
+  } else {
     /* if (_init_in_zero_) { */
-      // if in global frame, apply initial TF offset
-      /* tf2::doTransform(linear_velocity, linear_velocity, tf_msg); */
-      /* tf2::doTransform(angular_velocity, angular_velocity, tf_msg); */
+    // if in global frame, apply initial TF offset
+    /* tf2::doTransform(linear_velocity, linear_velocity, tf_msg); */
+    /* tf2::doTransform(angular_velocity, angular_velocity, tf_msg); */
     /* } */
 
     // if in global frame - rotate from GLOBAL frame to FCU frame
@@ -425,10 +425,10 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     return;
   }
 
-/*//{ compensate initial tilt */
+  /*//{ compensate initial tilt */
   if (compensate_initial_tilt_) {
     if (is_calibrated_) {
-      
+
       // First subtract the initial position in the initialization frame
       odom_transformed.pose.pose.position.x -= odom_init_.pose.pose.position.x;
       odom_transformed.pose.pose.position.y -= odom_init_.pose.pose.position.y;
@@ -439,23 +439,25 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       Eigen::Matrix3d init_rot = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation);
       pos << odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z;
       pos = init_rot.inverse() * pos;
-      
+
       // Unrotate orientation
-      const Eigen::Quaterniond q_init_rot = mrs_lib::AttitudeConverter(init_rot);
-      const Eigen::Quaterniond q_curr_rot = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation);
+      const Eigen::Quaterniond q_init_rot   = mrs_lib::AttitudeConverter(init_rot);
+      const Eigen::Quaterniond q_curr_rot   = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation);
       const Eigen::Quaterniond q_calibrated = q_init_rot * q_curr_rot;
 
       odom_transformed.pose.pose.orientation = mrs_lib::AttitudeConverter(q_calibrated);
 
     } else {
-        mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
-        auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
-        ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg], waiting for calibration service call", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll*180/3.14, pitch*180/3.14, yaw*180/3.14);
-        has_valid_odom_ = true;
-        return;
+      mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
+      auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
+      ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg], waiting for calibration service call",
+                        odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14,
+                        pitch * 180 / 3.14, yaw * 180 / 3.14);
+      has_valid_odom_ = true;
+      return;
     }
   }
-/*//}*/
+  /*//}*/
 
   // publish
   try {
@@ -558,7 +560,9 @@ bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_
 
   ROS_INFO("[%s]: calibrating level horizon.", getName().c_str());
   auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
-  ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]", odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll*180/3.14, pitch*180/3.14, yaw*180/3.14);
+  ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]",
+                    odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14, pitch * 180 / 3.14,
+                    yaw * 180 / 3.14);
 
   res.success = true;
   res.message = "calibrated";
