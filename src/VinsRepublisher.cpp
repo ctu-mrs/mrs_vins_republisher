@@ -271,6 +271,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   nav_msgs::Odometry odom_transformed;
   odom_transformed.header          = odom->header;
   odom_transformed.header.frame_id = _mrs_vins_world_frame_;
+  odom_transformed.child_frame_id = _fcu_frame_;
 
   // Reference frames:
   // IMU = VINS body frame
