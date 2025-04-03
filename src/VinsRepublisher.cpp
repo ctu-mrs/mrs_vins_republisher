@@ -442,7 +442,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       pos = init_rot.inverse() * pos;
 
       // Unrotate orientation
-      const Eigen::Quaterniond q_init_rot   = mrs_lib::AttitudeConverter(init_rot);
+      const Eigen::Quaterniond q_init_rot   = mrs_lib::AttitudeConverter(init_rot.inverse());
       const Eigen::Quaterniond q_curr_rot   = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation);
       const Eigen::Quaterniond q_calibrated = q_init_rot * q_curr_rot;
 
