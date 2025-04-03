@@ -447,6 +447,10 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
       odom_transformed.pose.pose.orientation = mrs_lib::AttitudeConverter(q_calibrated);
 
+      auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation).getExtrinsicRPY();
+      ROS_INFO_ONCE("[VinsRepublisher]: odom_transformed: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg]",
+                        odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z, roll * 180 / 3.14,
+                        pitch * 180 / 3.14, yaw * 180 / 3.14);
     } else {
       mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
       auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
