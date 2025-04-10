@@ -478,7 +478,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   try {
     std::stringstream ss_pos;
-    ss_pos << std::fixed << std::setprecision(2) << "X: " << odom_transformed.pose.pose.position.x << " Y: " << odom_transformed.pose.pose.position.y << " Z: " << odom_transformed.pose.pose.position.z;
+    ss_pos << std::fixed << std::setprecision(2) << "VINS: X: " << odom_transformed.pose.pose.position.x << " Y: " << odom_transformed.pose.pose.position.y << " Z: " << odom_transformed.pose.pose.position.z;
     std_msgs::String string_pos;
     string_pos.data = ss_pos.str();
     publisher_status_.publish(string_pos);
