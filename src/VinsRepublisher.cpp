@@ -77,6 +77,7 @@ private:
   Eigen::Vector3d mean_acc_;
 
   ros::Publisher publisher_odom_;
+  ros::Publisher publisher_status_;
   ros::Time      publisher_odom_last_published_;
 
   ros::ServiceServer srvs_calibrate_;
@@ -155,6 +156,7 @@ void VinsRepublisher::onInit() {
   // | ----------------------- publishers ----------------------- |
 
   publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 10);
+  publisher_status_ = nh_.advertise<std_msgs::String>("status_string", 2);
 
   if (compensate_initial_tilt_) {
     srvs_calibrate_ = nh_.advertiseService("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback, this);
@@ -473,6 +475,19 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   catch (...) {
     ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
   }
+
+  try {
+    std::stringstream ss_pos;
+    ss_pos << std::fixed << std::setprecision(2) << "X: " << odom_transformed.pose.pose.position.x << "Y: " << odom_transformed.pose.pose.position.y << "Z: " << odom_transformed.pose.pose.position.z;
+    std_msgs::String string_pos;
+    string_pos.data = ss_pos.str();
+    publisher_status_.publish(string_pos);
+    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
+  }
+  catch (...) {
+    ROS_ERROR("exception caught during publishing topic '%s'", publisher_status_.getTopic().c_str());
+  }
+
 }
 
 //}
