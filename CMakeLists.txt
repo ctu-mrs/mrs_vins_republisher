@@ -1,58 +1,77 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(mrs_vins_republisher)
 
-## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++17)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-  roscpp
+set(DEPENDENCIES
   tf2
   tf2_ros
   mrs_lib
-  nodelet
+  pluginlib
+  rclcpp_components
 )
 
 set(LIBRARIES
   MrsVinsRepublisher
-  )
-
-catkin_package(
- # INCLUDE_DIRS include
- LIBRARIES MrsVinsRepublisher
- CATKIN_DEPENDS roscpp tf2 tf2_ros mrs_lib
- # DEPENDS system_lib
 )
 
+foreach(DEP IN LISTS DEPENDENCIES)
+  find_package(${DEP} REQUIRED)
+endforeach()
+
 include_directories(
-  # include
-  ${catkin_INCLUDE_DIRS}
+  ${mrs_lib_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-add_library(MrsVinsRepublisher src/VinsRepublisher.cpp)
+add_library(MrsVinsRepublisher_component SHARED src/VinsRepublisher.cpp)
 
-## Specify libraries to link a library or executable target against
-target_link_libraries(MrsVinsRepublisher
-  ${catkin_LIBRARIES}
+#target_link_libraries(${PROJECT_NAME}_single_node_component
+#  ${LOCAL_MVIMPACT_LIBRARIES}
+#  ${LOCAL_TOOLKIT_LIBRARIES}
+#)
+
+rclcpp_components_register_node(
+    MrsVinsRepublisher_component
+    PLUGIN "mrs_vins_republisher::VinsRepublisher"
+    EXECUTABLE MrsVinsRepublisher
 )
+
+# Apply dependencies to the target
+ament_target_dependencies(MrsVinsRepublisher_component
+  ${DEPENDENCIES}
+)
+
+# Link OpenCV libraries
+#target_link_libraries(MrsVinsRepublisher_component
+#  ${OpenCV_LIBRARIES}
+#  ${PCL_LIBRARIES}
+#  ${flame_LIBRARIES}
+# ${Sophus_LIBRARIES}
+#)
 
 ## --------------------------------------------------------------
 ## |                           Install                          |
 ## --------------------------------------------------------------
 
-install(TARGETS ${LIBRARIES}
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-  )
+install(TARGETS MrsVinsRepublisher_component
+  EXPORT export_MrsVinsRepublisher
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 install(DIRECTORY config launch
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
   )
 
-install(FILES plugins.xml
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-  )
+ament_export_targets(
+  export_MrsVinsRepublisher
+)
+
+ament_export_dependencies(
+  ${DEPENDENCIES}
+)
+
+ament_package()

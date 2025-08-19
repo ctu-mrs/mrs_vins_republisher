@@ -1,23 +1,23 @@
 /* includes //{ */
 
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/convert.h>
 #include <tf2_ros/transform_broadcaster.h>
 
-#include <geometry_msgs/TransformStamped.h>
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
-#include <geometry_msgs/PoseWithCovariance.h>
-#include <geometry_msgs/TwistWithCovarianceStamped.h>
-#include <geometry_msgs/Vector3.h>
-#include <nav_msgs/Odometry.h>
-#include <std_msgs/String.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance.hpp>
+#include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
+#include <geometry_msgs/msg/vector3.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <std_msgs/msg/string.hpp>
 
-#include <sensor_msgs/Imu.h>
-#include <std_srvs/SetBool.h>
+#include <sensor_msgs/msg/imu.hpp>
+#include <std_srvs/srv/set_bool.hpp>
 
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
@@ -29,9 +29,7 @@
 #include <mrs_lib/msg_extractor.h>
 #include <mrs_lib/geometry/conversions.h>
 
-#include <nodelet/nodelet.h>
-
-#include <pluginlib/class_list_macros.h>
+#include "log_rate_limiter.h"
 
 //}
 
@@ -40,11 +38,16 @@ namespace vins_republisher
 
 /* class VinsRepublisher //{ */
 
-class VinsRepublisher : public nodelet::Nodelet {
+class VinsRepublisher : public rclcpp::Node {
 public:
-  virtual void onInit();
+  //virtual void onInit();
+  VinsRepublisher(const rclcpp::NodeOptions & options);
 
 private:
+  /* timer initialization */
+  rclcpp::TimerBase::SharedPtr timer_initialization_;
+  void timerInitialization();
+
   /* flags */
   bool is_initialized_        = false;
   bool _rate_limiter_enabled_ = false;
@@ -61,32 +64,32 @@ private:
   bool   got_init_pose_ = false;
   double init_hdg_;
 
-  bool                                                validateOdometry(const nav_msgs::Odometry &odometry);
-  geometry_msgs::PoseWithCovariance::_covariance_type transformCovariance(const geometry_msgs::PoseWithCovariance::_covariance_type &cov_in,
+  bool                                                validateOdometry(const nav_msgs::msg::Odometry &odometry);
+  geometry_msgs::msg::PoseWithCovariance::_covariance_type transformCovariance(const geometry_msgs::msg::PoseWithCovariance::_covariance_type &cov_in,
                                                                           const tf2::Transform &                                     transform);
 
   // | ------------------------ callbacks ----------------------- |
-  ros::Subscriber subscriber_vins_;
-  void            odometryCallback(const nav_msgs::OdometryConstPtr &odom);
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscriber_vins_;
+  void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
 
-  ros::Subscriber subscriber_imu_;
-  void            imuCallback(const sensor_msgs::ImuConstPtr &odom);
-  bool            is_averaging_          = false;
-  bool            is_averaging_finished_ = false;
-  int             n_imu_meas_            = 0;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subscriber_imu_;
+  void imuCallback(const sensor_msgs::msg::Imu::SharedPtr &odom);
+  bool is_averaging_ = false;
+  bool is_averaging_finished_ = false;
+  int  n_imu_meas_ = 0;
   Eigen::Vector3d mean_acc_;
 
-  ros::Publisher publisher_odom_;
-  ros::Publisher publisher_status_;
-  ros::Time      publisher_odom_last_published_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr publisher_odom_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_status_;
+  rclcpp::Time publisher_odom_last_published_;
 
-  ros::ServiceServer srvs_calibrate_;
-  bool               compensate_initial_tilt_;
-  bool               calibrateSrvCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
-  bool               is_calibrated_  = false;
-  bool               has_valid_odom_ = false;
-  nav_msgs::Odometry odom_init_;
-  std::mutex         mtx_odom_init_;
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr srvs_calibrate_;
+  bool compensate_initial_tilt_;
+  bool calibrateSrvCallback(const std::shared_ptr<std_srvs::srv::SetBool::Request> req, std::shared_ptr<std_srvs::srv::SetBool::Response> res);
+  bool is_calibrated_  = false;
+  bool has_valid_odom_ = false;
+  nav_msgs::msg::Odometry odom_init_;
+  std::mutex mtx_odom_init_;
 
   /* transformation handler */
   mrs_lib::Transformer transformer_;
@@ -101,34 +104,32 @@ private:
 
 /* onInit() //{ */
 
-void VinsRepublisher::onInit() {
-  const std::string node_name("VinsRepublisher");
+VinsRepublisher::VinsRepublisher(const rclcpp::NodeOptions & options) : rclcpp::Node("VinsRepublisher", options) {
+  timer_initialization_ = create_wall_timer(std::chrono::duration<double>(1.0), std::bind(&VinsRepublisher::timerInitialization, this));
+}
 
-  /* obtain node handle */
-  /* ros::NodeHandle nh("~"); */
-  ros::NodeHandle nh_ = nodelet::Nodelet::getMTPrivateNodeHandle();
-
-  ROS_INFO("[%s]: Initializing", node_name.c_str());
+void VinsRepublisher::timerInitialization(){
+  RCLCPP_INFO(get_logger(), "[%s]: Initializing", get_name());
 
   /* waits for the ROS to publish clock */
-  ros::Time::waitForValid();
+  //rclcpp::Time::waitForValid(); TODO: replacement?
 
-  publisher_odom_last_published_ = ros::Time(0);
+  publisher_odom_last_published_ = rclcpp::Time(0);
 
   mean_acc_ << 0, 0, 0;
 
   // | ---------- loading ros parameters using mrs_lib ---------- |
-  ROS_INFO("[%s]: loading parameters using ParamLoader", node_name.c_str());
+  RCLCPP_INFO(get_logger(), "[%s]: loading parameters using ParamLoader", get_name());
 
-  mrs_lib::ParamLoader param_loader(nh_, node_name);
+  mrs_lib::ParamLoader param_loader(shared_from_this(), get_name());
 
   param_loader.loadParam("uav_name", _uav_name_);
   param_loader.loadParam("velocity_in_body_frame", _velocity_in_body_frame_);
   param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
   param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
   if (_rate_limiter_rate_ <= 1e-3) {
-    ROS_ERROR("[%s]: the rate limit has to be > 0", ros::this_node::getName().c_str());
-    ros::shutdown();
+    RCLCPP_ERROR(get_logger(), "[%s]: the rate limit has to be > 0", get_name());
+    rclcpp::shutdown();
   }
 
   param_loader.loadParam("fcu_frame", _fcu_frame_);
@@ -140,74 +141,75 @@ void VinsRepublisher::onInit() {
   param_loader.loadParam("compensate_initial_tilt", compensate_initial_tilt_, false);
 
   if (!param_loader.loadedSuccessfully()) {
-    ROS_ERROR("[%s]: parameter loading failure", node_name.c_str());
-    ros::shutdown();
+    RCLCPP_ERROR(get_logger(), "[%s]: parameter loading failure", get_name());
+    rclcpp::shutdown();
   }
 
   /* transformation handler */
-  transformer_ = mrs_lib::Transformer("VinsRepublisher");
+  transformer_ = mrs_lib::Transformer(shared_from_this());
 
   broadcaster_ = std::make_shared<mrs_lib::TransformBroadcaster>();
 
   // | ----------------------- subscribers ---------------------- |
 
-  subscriber_vins_ = nh_.subscribe("vins_odom_in", 10, &VinsRepublisher::odometryCallback, this, ros::TransportHints().tcpNoDelay());
+  subscriber_vins_ = create_subscription<nav_msgs::msg::Odometry>("vins_odom_in", 10, std::bind(&VinsRepublisher::odometryCallback, this, std::placeholders::_1));
 
   // | ----------------------- publishers ----------------------- |
 
-  publisher_odom_ = nh_.advertise<nav_msgs::Odometry>("vins_odom_out", 10);
-  publisher_status_ = nh_.advertise<std_msgs::String>("status_string", 2);
+  publisher_odom_ = create_publisher<nav_msgs::msg::Odometry>("vins_odom_out", 10);
+  publisher_status_ = create_publisher<std_msgs::msg::String>("status_string", 2);
 
   if (compensate_initial_tilt_) {
-    srvs_calibrate_ = nh_.advertiseService("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback, this);
+    //srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback);
+    srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("srv_calibrate_in", std::bind(&VinsRepublisher::calibrateSrvCallback, this, std::placeholders::_1, std::placeholders::_2));
   }
 
   is_initialized_ = true;
 
-  ROS_INFO_ONCE("[%s]: initialized", node_name.c_str());
+  //RCLCPP_INFO_ONCE(get_logger(), "[%s]: initialized", get_name());
 }
 //}
 
 /* validateOdometry() //{ */
 
-bool VinsRepublisher::validateOdometry(const nav_msgs::Odometry &odometry) {
+bool VinsRepublisher::validateOdometry(const nav_msgs::msg::Odometry &odometry) {
 
   // check position
 
   if (!std::isfinite(odometry.pose.pose.position.x)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.x'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.x'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.pose.pose.position.y)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.y'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.y'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.pose.pose.position.z)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.z'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.position.z'!!!");
     return false;
   }
 
   // check orientation
 
   if (!std::isfinite(odometry.pose.pose.orientation.x)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.x'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.x'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.pose.pose.orientation.y)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.y'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.y'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.pose.pose.orientation.z)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.z'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.z'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.pose.pose.orientation.w)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.w'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.pose.pose.orientation.w'!!!");
     return false;
   }
 
@@ -217,24 +219,24 @@ bool VinsRepublisher::validateOdometry(const nav_msgs::Odometry &odometry) {
                            odometry.pose.pose.orientation.w)
                .norm() -
            1.0) > 1e-2) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: orientation is not sound!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: orientation is not sound!!!");
     return false;
   }
 
   // check velocity
 
   if (!std::isfinite(odometry.twist.twist.linear.x)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.x'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.x'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.twist.twist.linear.y)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.y'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.y'!!!");
     return false;
   }
 
   if (!std::isfinite(odometry.twist.twist.linear.z)) {
-    ROS_ERROR_THROTTLE(1.0, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.z'!!!");
+    RATE_LIMITED_ERROR(1000, "[ControlManager]: NaN detected in variable 'odometry.twist.twist.linear.z'!!!");
     return false;
   }
 
@@ -245,33 +247,33 @@ bool VinsRepublisher::validateOdometry(const nav_msgs::Odometry &odometry) {
 
 /* odometryCallback() //{ */
 
-void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
+void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr odom) {
 
   if (!is_initialized_) {
     return;
   }
 
   if (!validateOdometry(*odom)) {
-    ROS_ERROR("[VinsRepublisher]: input odometry is not numerically valid");
+    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: input odometry is not numerically valid");
     return;
   }
 
-  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.seq);
-  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.sec);
-  ROS_DEBUG("[VinsRepublisher]: %d ", odom->header.stamp.nsec);
+  //RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.seq);
+  RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.stamp.sec);
+  RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.stamp.nanosec);
 
-  ROS_DEBUG("[now]: %f", ros::Time::now().toSec());
-  ROS_DEBUG("[last published]: %f", publisher_odom_last_published_.toSec());
-  ROS_DEBUG("[fabs diff]: %f", fabs((ros::Time::now() - publisher_odom_last_published_).toSec()));
-  ROS_DEBUG("[diff]: %f", (ros::Time::now() - publisher_odom_last_published_).toSec());
-  ROS_DEBUG("[rate_limiter]: %f", 1.0 / _rate_limiter_rate_);
-  if (_rate_limiter_enabled_ && fabs((ros::Time::now() - publisher_odom_last_published_).toSec()) < (1.0 / (_rate_limiter_rate_))) {
-    ROS_DEBUG("[%s]: skipping over", ros::this_node::getName().c_str());
+  RCLCPP_DEBUG(get_logger(), "[now]: %f", get_clock()->now().seconds());
+  RCLCPP_DEBUG(get_logger(), "[last published]: %f", publisher_odom_last_published_.seconds());
+  RCLCPP_DEBUG(get_logger(), "[fabs diff]: %f", fabs((get_clock()->now() - publisher_odom_last_published_).seconds()));
+  RCLCPP_DEBUG(get_logger(), "[diff]: %f", (get_clock()->now() - publisher_odom_last_published_).seconds());
+  RCLCPP_DEBUG(get_logger(), "[rate_limiter]: %f", 1.0 / _rate_limiter_rate_);
+  if (_rate_limiter_enabled_ && fabs((get_clock()->now() - publisher_odom_last_published_).seconds()) < (1.0 / (_rate_limiter_rate_))) {
+    RCLCPP_DEBUG(get_logger(), "[%s]: skipping over", get_name());
     return;
   }
 
-  nav_msgs::Odometry odom_transformed;
-  odom_transformed.header          = odom->header;
+  nav_msgs::msg::Odometry odom_transformed;
+  odom_transformed.header = odom->header;
   odom_transformed.header.frame_id = _mrs_vins_world_frame_;
   odom_transformed.child_frame_id = _fcu_frame_;
 
@@ -290,13 +292,13 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   // T^IMU_FCU - transforms points from FCU to IMU
   auto T_IMU_FCU = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
   if (!T_IMU_FCU) {
-    ROS_WARN_THROTTLE(1.0, "[%s]: could not find transform from '%s' to '%s'", ros::this_node::getName().c_str(), _fcu_frame_.c_str(),
+    RATE_LIMITED_WARNING(1000, "could not find transform from '%s' to '%s'", _fcu_frame_.c_str(),
                       _vins_fcu_frame_.c_str());
     return;
   }
 
   /* transform pose with covariance */ /*//{*/
-  geometry_msgs::Pose pose_transformed;
+  geometry_msgs::msg::Pose pose_transformed;
 
   // R^IMU_FCU
   Eigen::Matrix3d R_IMU_FCU = mrs_lib::AttitudeConverter(T_IMU_FCU.value().transform.rotation);
@@ -320,11 +322,11 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   // pose_transformed is now T^GLOBAL_FCU
 
   // save initial pose to subtract it from all messages to compensate initialized orientation ambiguity
-  geometry_msgs::TransformStamped tf_msg;
+  geometry_msgs::msg::TransformStamped tf_msg;
   if (_init_in_zero_) {
     if (!got_init_pose_) {
       init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
-      ROS_INFO("[VinsRepublisher]: init hdg: %.2f", init_hdg_);
+      RCLCPP_INFO(get_logger(), "[VinsRepublisher]: init hdg: %.2f", init_hdg_);
       got_init_pose_ = true;
     }
 
@@ -354,7 +356,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
   }
 
   // publish the initial offset to TF - T^GLOBAL_MRS
-  geometry_msgs::TransformStamped tf_msg_inv;
+  geometry_msgs::msg::TransformStamped tf_msg_inv;
   tf_msg_inv.header.stamp            = odom->header.stamp;
   tf_msg_inv.header.frame_id         = odom->header.frame_id;
   tf_msg_inv.child_frame_id          = odom_transformed.header.frame_id;
@@ -367,15 +369,15 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
     broadcaster_->sendTransform(tf_msg_inv);
   }
   catch (...) {
-    ROS_ERROR("[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
+    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
   }
 
   odom_transformed.pose.pose = pose_transformed;
   /*//}*/
 
   /* transform velocity - linear and angular */ /*//{*/
-  geometry_msgs::Vector3 linear_velocity  = odom->twist.twist.linear;
-  geometry_msgs::Vector3 angular_velocity = odom->twist.twist.angular;
+  geometry_msgs::msg::Vector3 linear_velocity  = odom->twist.twist.linear;
+  geometry_msgs::msg::Vector3 angular_velocity = odom->twist.twist.angular;
   if (_velocity_in_body_frame_) {
     // if in body frame - rotate from IMU frame to FCU frame
     Eigen::Vector3d v2;
@@ -424,7 +426,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   // validate
   if (!validateOdometry(odom_transformed)) {
-    ROS_ERROR("[VinsRepublisher]: transformed odometry is not numerically valid");
+    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: transformed odometry is not numerically valid");
     return;
   }
 
@@ -451,13 +453,13 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
       odom_transformed.pose.pose.orientation = mrs_lib::AttitudeConverter(q_calibrated);
 
       auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation).getExtrinsicRPY();
-      ROS_INFO_ONCE("[VinsRepublisher]: odom_transformed: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg]",
-                        odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z, roll * 180 / 3.14,
-                        pitch * 180 / 3.14, yaw * 180 / 3.14);
+      //ROS_INFO_ONCE("[VinsRepublisher]: odom_transformed: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg]",
+      //                  odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z, roll * 180 / 3.14,
+      //                  pitch * 180 / 3.14, yaw * 180 / 3.14);
     } else {
       mrs_lib::set_mutexed(mtx_odom_init_, odom_transformed, odom_init_);
       auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
-      ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg], waiting for calibration service call",
+      RATE_LIMITED_ERROR(1000, "init_odom: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg], waiting for calibration service call",
                         odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14,
                         pitch * 180 / 3.14, yaw * 180 / 3.14);
       has_valid_odom_ = true;
@@ -468,24 +470,24 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 
   // publish
   try {
-    publisher_odom_.publish(odom_transformed);
-    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
-    publisher_odom_last_published_ = ros::Time::now();
+    publisher_odom_->publish(odom_transformed);
+    //RATE_LIMITED_LOG(1000, "Publishing");
+    publisher_odom_last_published_ = get_clock()->now();
   }
   catch (...) {
-    ROS_ERROR("exception caught during publishing topic '%s'", publisher_odom_.getTopic().c_str());
+    RCLCPP_ERROR(get_logger(), "exception caught during publishing topic '%s'", publisher_odom_->get_topic_name());
   }
 
   try {
     std::stringstream ss_pos;
     ss_pos << std::fixed << std::setprecision(2) << "VINS: X: " << odom_transformed.pose.pose.position.x << " Y: " << odom_transformed.pose.pose.position.y << " Z: " << odom_transformed.pose.pose.position.z;
-    std_msgs::String string_pos;
+    std_msgs::msg::String string_pos;
     string_pos.data = ss_pos.str();
-    publisher_status_.publish(string_pos);
-    ROS_INFO_THROTTLE(1.0, "[%s]: Publishing", ros::this_node::getName().c_str());
+    publisher_status_->publish(string_pos);
+    //RATE_LIMITED_LOG(1000, "Publishing");
   }
   catch (...) {
-    ROS_ERROR("exception caught during publishing topic '%s'", publisher_status_.getTopic().c_str());
+    RCLCPP_ERROR(get_logger(), "exception caught during publishing topic '%s'", publisher_status_->get_topic_name());
   }
 
 }
@@ -495,7 +497,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::OdometryConstPtr &odom) {
 /* transformCovariance() */ /*//{*/
 // taken from https://github.com/ros/geometry2/blob/noetic-devel/tf2_geometry_msgs/include/tf2_geometry_msgs/tf2_geometry_msgs.h
 // copied here, so that it's clear what it does right away
-geometry_msgs::PoseWithCovariance::_covariance_type VinsRepublisher::transformCovariance(const geometry_msgs::PoseWithCovariance::_covariance_type &cov_in,
+geometry_msgs::msg::PoseWithCovariance::_covariance_type VinsRepublisher::transformCovariance(const geometry_msgs::msg::PoseWithCovariance::_covariance_type &cov_in,
                                                                                          const tf2::Transform &                                     transform) {
   /**
    * To transform a covariance matrix:
@@ -525,7 +527,7 @@ geometry_msgs::PoseWithCovariance::_covariance_type VinsRepublisher::transformCo
   const tf2::Matrix3x3 result_22 = transform.getBasis() * cov_22 * R_transpose;
 
   // form the output
-  geometry_msgs::PoseWithCovariance::_covariance_type output;
+  geometry_msgs::msg::PoseWithCovariance::_covariance_type output;
   output[0]  = result_11[0][0];
   output[1]  = result_11[0][1];
   output[2]  = result_11[0][2];
@@ -571,21 +573,21 @@ geometry_msgs::PoseWithCovariance::_covariance_type VinsRepublisher::transformCo
 /*//}*/
 
 /*//{ calibrateSrvCallback() */
-bool VinsRepublisher::calibrateSrvCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res) {
+bool VinsRepublisher::calibrateSrvCallback(const std::shared_ptr<std_srvs::srv::SetBool::Request> req, std::shared_ptr<std_srvs::srv::SetBool::Response> res) {
 
   if (!has_valid_odom_) {
-    ROS_ERROR("[%s]: service for calibration called before obtaining valid odom.", getName().c_str());
+    RCLCPP_ERROR(get_logger(), "service for calibration called before obtaining valid odom.");
     return false;
   }
 
-  ROS_INFO("[%s]: calibrating level horizon.", getName().c_str());
+  RCLCPP_INFO(get_logger(), "calibrating level horizon.");
   auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
-  ROS_INFO_THROTTLE(1.0, "[VinsRepublisher]: calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]",
-                    odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14, pitch * 180 / 3.14,
-                    yaw * 180 / 3.14);
+  //RATE_LIMITED_LOG(1000, "calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]",
+  //                  odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14, pitch * 180 / 3.14,
+  //                  yaw * 180 / 3.14);
 
-  res.success = true;
-  res.message = "calibrated";
+  res->success = true;
+  res->message = "calibrated";
 
   is_calibrated_ = true;
 
@@ -617,4 +619,6 @@ Eigen::Matrix3d VinsRepublisher::skewSymmetricMatrix(const Eigen::Vector3d &vec)
 
 }  // namespace vins_republisher
 /* every nodelet must export its class as nodelet plugin */
-PLUGINLIB_EXPORT_CLASS(vins_republisher::VinsRepublisher, nodelet::Nodelet);
+
+#include <rclcpp_components/register_node_macro.hpp>
+RCLCPP_COMPONENTS_REGISTER_NODE(vins_republisher::VinsRepublisher)
