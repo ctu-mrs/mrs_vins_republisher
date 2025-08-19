@@ -165,7 +165,7 @@ void VinsRepublisher::timerInitialization(){
   }
 
   is_initialized_ = true;
-
+  timer_initialization_->cancel();
   //RCLCPP_INFO_ONCE(get_logger(), "[%s]: initialized", get_name());
 }
 //}
