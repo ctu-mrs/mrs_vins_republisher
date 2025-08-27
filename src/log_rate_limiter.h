@@ -23,7 +23,7 @@ public:
      * Constructor
      * @param interval_ms Minimum interval between prints in milliseconds (default: 5000ms = 5s)
      */
-    explicit RateLimiter(int interval_ms = 5000) 
+    explicit RateLimiter(int interval_ms = 5000)
         : last_print_(std::chrono::steady_clock::time_point{})
         , suppressed_count_(0)
         , interval_(interval_ms) {}
@@ -35,14 +35,14 @@ public:
     bool shouldPrint() const {
         auto now = std::chrono::steady_clock::now();
         auto last = last_print_.load();
-        
+
         if (now - last >= interval_) {
             // Try to update the time atomically
             if (last_print_.compare_exchange_strong(last, now)) {
                 return true;
             }
         }
-        
+
         // Rate limited - increment suppressed counter
         suppressed_count_.fetch_add(1);
         return false;
@@ -88,21 +88,21 @@ private:
     void printTo(std::ostream& stream, const char* color, Args&&... args) const {
         if (shouldPrint()) {
             int suppressed = getSuppressedCount();
-            
+
             // Print color code if specified
             if (color) stream << color;
-            
+
             // Print the message
             ((stream << args << " "), ...);
-            
+
             // // Add suppression info if any
             // if (suppressed > 0) {
             //     stream << "(" << suppressed << " similar messages suppressed)";
             // }
-            
+
             // Reset color if specified
             if (color) stream << RESET;
-            
+
             stream << std::endl;
         }
     }
