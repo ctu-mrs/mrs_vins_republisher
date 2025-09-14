@@ -114,7 +114,7 @@ void VinsRepublisher::timerInitialization(){
   /* waits for the ROS to publish clock */
   //rclcpp::Time::waitForValid(); TODO: replacement?
 
-  publisher_odom_last_published_ = rclcpp::Time(0);
+  publisher_odom_last_published_ = get_clock()->now();
 
   mean_acc_ << 0, 0, 0;
 
@@ -148,7 +148,7 @@ void VinsRepublisher::timerInitialization(){
   /* transformation handler */
   transformer_ = mrs_lib::Transformer(shared_from_this());
 
-  broadcaster_ = std::make_shared<mrs_lib::TransformBroadcaster>();
+  broadcaster_ = std::make_shared<mrs_lib::TransformBroadcaster>(shared_from_this());
 
   // | ----------------------- subscribers ---------------------- |
 
@@ -292,8 +292,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   // T^IMU_FCU - transforms points from FCU to IMU
   auto T_IMU_FCU = transformer_.getTransform(_fcu_frame_, _vins_fcu_frame_, odom->header.stamp);
   if (!T_IMU_FCU) {
-    RATE_LIMITED_WARNING(1000, "could not find transform from '%s' to '%s'", _fcu_frame_.c_str(),
-                      _vins_fcu_frame_.c_str());
+    RATE_LIMITED_WARNING(1000, "could not find transform from ", _fcu_frame_.c_str(), " to ", _vins_fcu_frame_.c_str());
     return;
   }
 
@@ -365,11 +364,71 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   tf_msg_inv.transform.translation.x = 0;
   tf_msg_inv.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
 
+  // try {
+  //   broadcaster_->sendTransform(tf_msg_inv);
+  // }
+  // catch (...) {
+  //   RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
+  // }
+
   try {
     broadcaster_->sendTransform(tf_msg_inv);
   }
+  catch (const tf2::TransformException& ex) {
+    RCLCPP_ERROR(get_logger(), 
+      "[VinsRepublisher]: TF Transform Exception during publishing TF: %s -> %s. "
+      "Error: %s. Transform: [%.3f, %.3f, %.3f], [%.3f, %.3f, %.3f, %.3f], stamp: %f", 
+      tf_msg_inv.header.frame_id.c_str(), 
+      tf_msg_inv.child_frame_id.c_str(),
+      ex.what(),
+      tf_msg_inv.transform.translation.x,
+      tf_msg_inv.transform.translation.y, 
+      tf_msg_inv.transform.translation.z,
+      tf_msg_inv.transform.rotation.x,
+      tf_msg_inv.transform.rotation.y,
+      tf_msg_inv.transform.rotation.z,
+      tf_msg_inv.transform.rotation.w,
+      tf_msg_inv.header.stamp.sec + tf_msg_inv.header.stamp.nanosec * 1e-9);
+  }
+  catch (const std::runtime_error& ex) {
+    RCLCPP_ERROR(get_logger(),
+      "[VinsRepublisher]: Runtime error during publishing TF: %s -> %s. "
+      "Error: %s",
+      tf_msg_inv.header.frame_id.c_str(),
+      tf_msg_inv.child_frame_id.c_str(),
+      ex.what());
+  }
+  catch (const std::exception& ex) {
+    RCLCPP_ERROR(get_logger(),
+      "[VinsRepublisher]: Standard exception during publishing TF: %s -> %s. "
+      "Error: %s. Transform data: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f,%.3f]",
+      tf_msg_inv.header.frame_id.c_str(),
+      tf_msg_inv.child_frame_id.c_str(),
+      ex.what(),
+      tf_msg_inv.transform.translation.x,
+      tf_msg_inv.transform.translation.y,
+      tf_msg_inv.transform.translation.z,
+      tf_msg_inv.transform.rotation.x,
+      tf_msg_inv.transform.rotation.y,
+      tf_msg_inv.transform.rotation.z,
+      tf_msg_inv.transform.rotation.w);
+  }
   catch (...) {
-    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
+    RCLCPP_ERROR(get_logger(),
+      "[VinsRepublisher]: Unknown exception during publishing TF: %s -> %s. "
+      "Transform: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f,%.3f] stamp: %f. "
+      "Broadcaster state: %s",
+      tf_msg_inv.header.frame_id.c_str(),
+      tf_msg_inv.child_frame_id.c_str(),
+      tf_msg_inv.transform.translation.x,
+      tf_msg_inv.transform.translation.y,
+      tf_msg_inv.transform.translation.z,
+      tf_msg_inv.transform.rotation.x,
+      tf_msg_inv.transform.rotation.y,
+      tf_msg_inv.transform.rotation.z,
+      tf_msg_inv.transform.rotation.w,
+      tf_msg_inv.header.stamp.sec + tf_msg_inv.header.stamp.nanosec * 1e-9,
+      broadcaster_ ? "valid" : "null");
   }
 
   odom_transformed.pose.pose = pose_transformed;

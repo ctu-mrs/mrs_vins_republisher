@@ -40,16 +40,8 @@ def generate_launch_description():
         default_value='true',
         description='Whether running in simulation or real hardware'
     )
-
-    # Frame arguments - these change based on VINS type
-    mrs_vins_world_frame_arg = DeclareLaunchArgument(
-        'mrs_vins_world_frame',
-        default_value=[LaunchConfiguration('UAV_NAME'), '/mrs_vins_world'],
-        description='MRS VINS world frame'
-    )
     
     # Default VINS setup
-    vins_world_frame_default = [LaunchConfiguration('UAV_NAME'), '/vins_world']
     vins_fcu_frame_default = [LaunchConfiguration('UAV_NAME'), '/vins_body']
     
     # OpenVINS setup  
@@ -58,7 +50,7 @@ def generate_launch_description():
     
     vins_world_frame_arg = DeclareLaunchArgument(
         'vins_world_frame',
-        default_value=vins_world_frame_default,
+        default_value='vins_world',
         description='VINS world frame'
     )
     
@@ -70,14 +62,8 @@ def generate_launch_description():
     
     vins_fcu_frame_arg = DeclareLaunchArgument(
         'vins_fcu_frame',
-        default_value=vins_fcu_frame_default,
+        default_value='vins_body',
         description='VINS FCU frame'
-    )
-    
-    vins_fcu_front_frame_arg = DeclareLaunchArgument(
-        'vins_fcu_front_frame',
-        default_value=[LaunchConfiguration('UAV_NAME'), '/vins_body_front'],
-        description='VINS FCU front frame'
     )
 
     # Static transform publishers - these define the sensor mounting positions
@@ -89,10 +75,10 @@ def generate_launch_description():
         namespace=LaunchConfiguration('UAV_NAME'),
         arguments=[
             # Default camera mounting: 8.5cm forward, 13cm up, rotated -90deg in X and Z
-            '0.085', '0.0', '0.13',
-            '-1.5708', '0.0', '-1.5708',
-            LaunchConfiguration('fcu_frame'),
-            LaunchConfiguration('vins_fcu_front_frame')
+            '0.0', '0.0', '0.0',
+            '0.0', '0.0', '0.0',
+            'uav1/fcu',
+            'uav1/vins_body_front'
         ]
     )
     
@@ -103,10 +89,10 @@ def generate_launch_description():
         name='tf_vins_fcu_to_mrs_fcu2', 
         namespace=LaunchConfiguration('UAV_NAME'),
         arguments=[
-            '0', '0', '0',
-            '0', '0', LaunchConfiguration('camera_pitch'),
-            LaunchConfiguration('vins_fcu_front_frame'),
-            LaunchConfiguration('vins_fcu_frame')
+            '0.0', '0.0', '0.0',
+            '0.0', '0.0', '0.0',
+            'uav1/vins_body_front',
+            'global'
         ]
     )
 
@@ -119,7 +105,8 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_intra_process_comms': True,
-        }]
+        }],
+        #prefix=['xterm -e gdb -ex run --args']
     )
 
     # Get config file path - use default config for this example
@@ -142,40 +129,25 @@ def generate_launch_description():
                     # config_file,  # Comment out if config file is causing issues
                     {
                         'uav_name': LaunchConfiguration('UAV_NAME'),
-                        'fcu_frame': LaunchConfiguration('fcu_frame'),
-                        'mrs_vins_world_frame': LaunchConfiguration('mrs_vins_world_frame'),
-                        'vins_fcu_frame': LaunchConfiguration('vins_fcu_frame'),
+                        'fcu_frame': 'uav1/fcu',
+                        'mrs_vins_world_frame': 'uav1/mrs_vins_world',
+                        'vins_fcu_frame': 'imu',
                         # Provide all required parameters directly
                         'rate_limiter/enabled': True,
                         'rate_limiter/max_rate': 30.0,
                         'velocity_in_body_frame': True,
                         'init_in_zero': True,
                         'compensate_initial_tilt': False,  # Set to false initially for simpler testing
+                        'use_sim_time': True
                     }
                 ],
                 remappings=[
                     # Default VINS remapping - change based on your VINS system
-                    ('~/vins_odom_in', 'vins_estimator/imu_propagate'),
-                    ('~/vins_odom_out', '~/odom'),
+                    ('/uav1/vins_odom_in', '/uav1/odomimu'),
+                    ('/uav1/vins_odom_out', '/odom'),
                 ],
-                extra_arguments=[{'use_intra_process_comms': True}]
+                extra_arguments=[{'use_intra_process_comms': True}],
             )
-        ]
-    )
-
-    # Note: For testing, you can manually publish to /uav1/vins_estimator/imu_propagate
-    # or use: ros2 topic pub /uav1/vins_estimator/imu_propagate nav_msgs/msg/Odometry "{header: {frame_id: 'uav1/vins_world'}, child_frame_id: 'uav1/vins_body'}"
-
-    # Example: Static world frame publisher (for visualization)
-    world_frame_publisher = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='world_frame_publisher',
-        arguments=[
-            '0', '0', '0',
-            '0', '0', '0',
-            'world',
-            LaunchConfiguration('mrs_vins_world_frame')
         ]
     )
 
@@ -195,14 +167,6 @@ def generate_launch_description():
         camera_pitch_arg,
         vins_type_arg,
         simulation_arg,
-        mrs_vins_world_frame_arg,
-        vins_world_frame_arg,
-        fcu_frame_arg,
-        vins_fcu_frame_arg,
-        vins_fcu_front_frame_arg,
-        
-        # World frame for visualization
-        world_frame_publisher,
         
         # UAV-specific nodes
         uav_group,
@@ -210,19 +174,19 @@ def generate_launch_description():
 
 
 # Additional helper function for different VINS configurations
-def create_openvins_config():
-    """Helper to create OpenVINS-specific configuration"""
-    return {
-        'vins_world_frame': 'ov_global',
-        'vins_fcu_frame': 'ov_imu', 
-        'input_topic': 'ov_msckf/odomimu',
-        'config_file': 'open_vins.yaml'
-    }
+#def create_openvins_config():
+#    """Helper to create OpenVINS-specific configuration"""
+#    return {
+#        'vins_world_frame': 'ov_global',
+#        'vins_fcu_frame': 'ov_imu', 
+#        'input_topic': 'ov_msckf/odomimu',
+#        'config_file': 'open_vins.yaml'
+#    }
 
-def create_bluefox_config():
-    """Helper to create BlueHox downward camera configuration"""
-    return {
-        'camera_pitch': '-1.5708',  # -90 degrees for downward camera
-        'static_transform': '0.1 0.0 -0.15 -1.5708 0.0 -1.5708',
-        'config_file': 'vins_mono.yaml'
-    }
+#def create_bluefox_config():
+#    """Helper to create BlueHox downward camera configuration"""
+#    return {
+#        'camera_pitch': '-1.5708',  # -90 degrees for downward camera
+#        'static_transform': '0.1 0.0 -0.15 -1.5708 0.0 -1.5708',
+#        'config_file': 'vins_mono.yaml'
+#    }
