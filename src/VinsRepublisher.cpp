@@ -334,8 +334,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
     tf_msg.header.frame_id         = odom_transformed.header.frame_id;
     tf_msg.child_frame_id          = odom->header.frame_id;
     tf_msg.transform.translation.x = 0;
-    tf_msg.transform.translation.x = 0;
-    tf_msg.transform.translation.x = 0;
+    tf_msg.transform.translation.y = 0;
+    tf_msg.transform.translation.z = 0;
     tf_msg.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(-init_hdg_);
 
     // obtain T^MRS_FCU
@@ -360,8 +360,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   tf_msg_inv.header.frame_id         = odom->header.frame_id;
   tf_msg_inv.child_frame_id          = odom_transformed.header.frame_id;
   tf_msg_inv.transform.translation.x = 0;
-  tf_msg_inv.transform.translation.x = 0;
-  tf_msg_inv.transform.translation.x = 0;
+  tf_msg_inv.transform.translation.y = 0;
+  tf_msg_inv.transform.translation.z = 0;
   tf_msg_inv.transform.rotation      = mrs_lib::AttitudeConverter(0, 0, 0).setHeading(init_hdg_);
 
   // try {
