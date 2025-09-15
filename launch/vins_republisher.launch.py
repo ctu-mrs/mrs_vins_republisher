@@ -41,30 +41,23 @@ def generate_launch_description():
         description='Whether running in simulation or real hardware'
     )
     
-    # Default VINS setup
-    vins_fcu_frame_default = [LaunchConfiguration('UAV_NAME'), '/vins_body']
+    # vins_world_frame_arg = DeclareLaunchArgument(
+    #     'vins_world_frame',
+    #     default_value='vins_world',
+    #     description='VINS world frame'
+    # )
     
-    # OpenVINS setup  
-    vins_world_frame_openvins = [LaunchConfiguration('UAV_NAME'), '/ov_global']
-    vins_fcu_frame_openvins = [LaunchConfiguration('UAV_NAME'), '/ov_imu']
+    # fcu_frame_arg = DeclareLaunchArgument(
+    #     'fcu_frame',
+    #     default_value=[LaunchConfiguration('UAV_NAME'), '/fcu'],
+    #     description='FCU frame'
+    # )
     
-    vins_world_frame_arg = DeclareLaunchArgument(
-        'vins_world_frame',
-        default_value='vins_world',
-        description='VINS world frame'
-    )
-    
-    fcu_frame_arg = DeclareLaunchArgument(
-        'fcu_frame',
-        default_value=[LaunchConfiguration('UAV_NAME'), '/fcu'],
-        description='FCU frame'
-    )
-    
-    vins_fcu_frame_arg = DeclareLaunchArgument(
-        'vins_fcu_frame',
-        default_value='vins_body',
-        description='VINS FCU frame'
-    )
+    # vins_fcu_frame_arg = DeclareLaunchArgument(
+    #     'vins_fcu_frame',
+    #     default_value='vins_body',
+    #     description='VINS FCU frame'
+    # )
 
     # Static transform publishers - these define the sensor mounting positions
     # Transform 1: FCU to VINS front frame (sensor mounting offset)
@@ -77,8 +70,8 @@ def generate_launch_description():
             # Default camera mounting: 8.5cm forward, 13cm up, rotated -90deg in X and Z
             '0.0', '0.0', '0.0',
             '0.0', '0.0', '0.0',
-            'uav1/fcu',
-            'uav1/vins_body_front'
+            [LaunchConfiguration('UAV_NAME'), '/fcu'],
+            [LaunchConfiguration('UAV_NAME'), '/vins_body_front']
         ]
     )
     
@@ -91,8 +84,8 @@ def generate_launch_description():
         arguments=[
             '0.0', '0.0', '0.0',
             '0.0', '0.0', '0.0',
-            'uav1/vins_body_front',
-            'global'
+            [LaunchConfiguration('UAV_NAME'), '/vins_body_front'],
+            [LaunchConfiguration('UAV_NAME'), '/imu']
         ]
     )
 
@@ -129,9 +122,9 @@ def generate_launch_description():
                     # config_file,  # Comment out if config file is causing issues
                     {
                         'uav_name': LaunchConfiguration('UAV_NAME'),
-                        'fcu_frame': 'uav1/fcu',
-                        'mrs_vins_world_frame': 'uav1/mrs_vins_world',
-                        'vins_fcu_frame': 'imu',
+                        'fcu_frame': [LaunchConfiguration('UAV_NAME'), '/fcu'],
+                        'mrs_vins_world_frame': [LaunchConfiguration('UAV_NAME'), '/mrs_vins_world'],
+                        'vins_fcu_frame': [LaunchConfiguration('UAV_NAME'), '/imu'],
                         # Provide all required parameters directly
                         'rate_limiter/enabled': True,
                         'rate_limiter/max_rate': 30.0,
