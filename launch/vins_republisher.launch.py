@@ -6,6 +6,7 @@ from launch_ros.actions import Node, LoadComposableNodes
 from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackageShare
 from mrs_lib import RemappingsCustomConfigParser, sanitize_custom_config_path
+from launch.substitutions import PythonExpression
 
 def generate_launch_description():
     """
@@ -68,6 +69,13 @@ def generate_launch_description():
         default_value='vins_body_front',
         description='VINS FCU frame - typically the IMU frame which is rigidly attached to the drone body'
     )
+    
+    # Declare launch argument for transform coordinates as array
+    camera_mount_coords_arg = DeclareLaunchArgument(
+        'camera_mount_coords', 
+        default_value='0.0 0.0 0.0 0.0 0.0 0.0', 
+        description='Transform coordinates as whitespace-separated values: x y z roll pitch yaw'
+    )
 
     # Static transform publishers - these define the sensor mounting positions
     # Transform 1: FCU to VINS front frame (sensor mounting offset)
@@ -78,8 +86,13 @@ def generate_launch_description():
         namespace=LaunchConfiguration('UAV_NAME'),
         arguments=[
             # Default camera mounting: 8.5cm forward, 13cm up, rotated -90deg in X and Z
-            '0.0', '0.0', '0.0',
-            '0.0', '0.0', '0.0',
+            # Parse coordinates from array argument with validation
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[0]"]),
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[1]"]),
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[2]"]),
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[3]"]),
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[4]"]),
+            PythonExpression(["'", LaunchConfiguration('camera_mount_coords'), "'.split()[5]"]),
             [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('fcu_frame')],
             [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('camera_mount_frame')]
         ]
@@ -181,6 +194,7 @@ def generate_launch_description():
         vins_world_frame_arg,
         vins_fcu_frame_arg,
         vins_camera_mount_frame_arg,
+        camera_mount_coords_arg,
         
         # UAV-specific nodes
         uav_group,
