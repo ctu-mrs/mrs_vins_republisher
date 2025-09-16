@@ -5,8 +5,7 @@ from launch.substitutions import LaunchConfiguration, EnvironmentVariable, PathJ
 from launch_ros.actions import Node, LoadComposableNodes
 from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackageShare
-from mrs_lib.remappings_custom_config_parser import RemappingsCustomConfigParser
-from mrs_lib.custom_config_path_sanitizer import sanitize_custom_config_path
+from mrs_lib import RemappingsCustomConfigParser, sanitize_custom_config_path
 
 def generate_launch_description():
     """
