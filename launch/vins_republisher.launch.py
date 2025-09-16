@@ -1,19 +1,24 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
-from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration, EnvironmentVariable, PathJoinSubstitution, TextSubstitution
+from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.substitutions import LaunchConfiguration, EnvironmentVariable, PathJoinSubstitution
 from launch_ros.actions import Node, LoadComposableNodes
 from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackageShare
-from ament_index_python.packages import get_package_share_directory
-
+from mrs_lib.remappings_custom_config_parser import RemappingsCustomConfigParser
+from mrs_lib.custom_config_path_sanitizer import sanitize_custom_config_path
 
 def generate_launch_description():
     """
     Example launch file demonstrating VINS Republisher functionality
     This example simulates a typical UAV setup with VINS odometry republishing
     """
+    
+    custom_config_arg = DeclareLaunchArgument(
+        'custom_config',
+        default_value="",
+        description='config from the user'
+    )
     
     # Declare launch arguments
     uav_name_arg = DeclareLaunchArgument(
@@ -41,23 +46,29 @@ def generate_launch_description():
         description='Whether running in simulation or real hardware'
     )
     
-    # vins_world_frame_arg = DeclareLaunchArgument(
-    #     'vins_world_frame',
-    #     default_value='vins_world',
-    #     description='VINS world frame'
-    # )
+    fcu_frame_arg = DeclareLaunchArgument(
+        'fcu_frame',
+        default_value='fcu',
+        description='FCU frame - the root of the transform tree'
+    )
     
-    # fcu_frame_arg = DeclareLaunchArgument(
-    #     'fcu_frame',
-    #     default_value=[LaunchConfiguration('UAV_NAME'), '/fcu'],
-    #     description='FCU frame'
-    # )
+    vins_world_frame_arg = DeclareLaunchArgument(
+        'vins_world_frame',
+        default_value='mrs_vins_world',
+        description='VINS world frame - the "root" of the transform tree according to the VIO'
+    )
     
-    # vins_fcu_frame_arg = DeclareLaunchArgument(
-    #     'vins_fcu_frame',
-    #     default_value='vins_body',
-    #     description='VINS FCU frame'
-    # )
+    vins_fcu_frame_arg = DeclareLaunchArgument(
+        'vins_fcu_frame',
+        default_value='imu',
+        description='VINS FCU frame - typically the IMU frame which is rigidly attached to the drone body'
+    )
+    
+    vins_camera_mount_frame_arg = DeclareLaunchArgument(
+        'camera_mount_frame',
+        default_value='vins_body_front',
+        description='VINS FCU frame - typically the IMU frame which is rigidly attached to the drone body'
+    )
 
     # Static transform publishers - these define the sensor mounting positions
     # Transform 1: FCU to VINS front frame (sensor mounting offset)
@@ -70,8 +81,8 @@ def generate_launch_description():
             # Default camera mounting: 8.5cm forward, 13cm up, rotated -90deg in X and Z
             '0.0', '0.0', '0.0',
             '0.0', '0.0', '0.0',
-            [LaunchConfiguration('UAV_NAME'), '/fcu'],
-            [LaunchConfiguration('UAV_NAME'), '/vins_body_front']
+            [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('fcu_frame')],
+            [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('camera_mount_frame')]
         ]
     )
     
@@ -83,9 +94,9 @@ def generate_launch_description():
         namespace=LaunchConfiguration('UAV_NAME'),
         arguments=[
             '0.0', '0.0', '0.0',
-            '0.0', '0.0', '0.0',
-            [LaunchConfiguration('UAV_NAME'), '/vins_body_front'],
-            [LaunchConfiguration('UAV_NAME'), '/imu']
+            '0.0', LaunchConfiguration('camera_pitch'), '0.0',
+            [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('camera_mount_frame')],
+            [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('vins_fcu_frame')]
         ]
     )
 
@@ -108,39 +119,44 @@ def generate_launch_description():
         'config',
         'default.yaml'
     ])
+    
+    republisher_node = ComposableNode(
+        package='mrs_vins_republisher',
+        plugin='vins_republisher::VinsRepublisher',
+        name='vins_republisher',
+        namespace=LaunchConfiguration('UAV_NAME'),
+        parameters=[
+            # config_file,  # Comment out if config file is causing issues
+            {
+                'uav_name': LaunchConfiguration('UAV_NAME'),
+                'fcu_frame': [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('fcu_frame')],
+                'mrs_vins_world_frame': [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('vins_world_frame')],
+                'vins_fcu_frame': [LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('vins_fcu_frame')],
+                # Provide all required parameters directly
+                'rate_limiter/enabled': True,
+                'rate_limiter/max_rate': 30.0,
+                'velocity_in_body_frame': True,
+                'init_in_zero': True,
+                'compensate_initial_tilt': False,  # Set to false initially for simpler testing
+                'use_sim_time': True,
+                'custom_config': sanitize_custom_config_path(LaunchConfiguration('custom_config'))
+            },
+        ],
+        remappings=[
+            # Default VINS remapping - change based on your VINS system
+            ('/uav1/vins_odom_in', '/uav1/odomimu'),
+            ('/uav1/vins_odom_out', '/odom'),
+        ],
+        extra_arguments=[{'use_intra_process_comms': True}],
+    )
+    
+    parser = RemappingsCustomConfigParser(republisher_node, LaunchConfiguration('custom_config'))
 
     # VINS Republisher as composable node
     vins_republisher_component = LoadComposableNodes(
         target_container=[LaunchConfiguration('UAV_NAME'), '/', LaunchConfiguration('UAV_NAME'), '_vinsrepublisher_manager'],
         composable_node_descriptions=[
-            ComposableNode(
-                package='mrs_vins_republisher',
-                plugin='vins_republisher::VinsRepublisher',
-                name='vins_republisher',
-                namespace=LaunchConfiguration('UAV_NAME'),
-                parameters=[
-                    # config_file,  # Comment out if config file is causing issues
-                    {
-                        'uav_name': LaunchConfiguration('UAV_NAME'),
-                        'fcu_frame': [LaunchConfiguration('UAV_NAME'), '/fcu'],
-                        'mrs_vins_world_frame': [LaunchConfiguration('UAV_NAME'), '/mrs_vins_world'],
-                        'vins_fcu_frame': [LaunchConfiguration('UAV_NAME'), '/imu'],
-                        # Provide all required parameters directly
-                        'rate_limiter/enabled': True,
-                        'rate_limiter/max_rate': 30.0,
-                        'velocity_in_body_frame': True,
-                        'init_in_zero': True,
-                        'compensate_initial_tilt': False,  # Set to false initially for simpler testing
-                        'use_sim_time': True
-                    }
-                ],
-                remappings=[
-                    # Default VINS remapping - change based on your VINS system
-                    ('/uav1/vins_odom_in', '/uav1/odomimu'),
-                    ('/uav1/vins_odom_out', '/odom'),
-                ],
-                extra_arguments=[{'use_intra_process_comms': True}],
-            )
+            republisher_node
         ]
     )
 
@@ -150,36 +166,23 @@ def generate_launch_description():
             tf_fcu_to_vins_front,
             tf_camera_pitch,
             component_container,
+            parser,
             vins_republisher_component,
         ]
     )
 
     return LaunchDescription([
         # Launch arguments
+        custom_config_arg,
         uav_name_arg,
         camera_pitch_arg,
         vins_type_arg,
         simulation_arg,
+        fcu_frame_arg,
+        vins_world_frame_arg,
+        vins_fcu_frame_arg,
+        vins_camera_mount_frame_arg,
         
         # UAV-specific nodes
         uav_group,
     ])
-
-
-# Additional helper function for different VINS configurations
-#def create_openvins_config():
-#    """Helper to create OpenVINS-specific configuration"""
-#    return {
-#        'vins_world_frame': 'ov_global',
-#        'vins_fcu_frame': 'ov_imu', 
-#        'input_topic': 'ov_msckf/odomimu',
-#        'config_file': 'open_vins.yaml'
-#    }
-
-#def create_bluefox_config():
-#    """Helper to create BlueHox downward camera configuration"""
-#    return {
-#        'camera_pitch': '-1.5708',  # -90 degrees for downward camera
-#        'static_transform': '0.1 0.0 -0.15 -1.5708 0.0 -1.5708',
-#        'config_file': 'vins_mono.yaml'
-#    }

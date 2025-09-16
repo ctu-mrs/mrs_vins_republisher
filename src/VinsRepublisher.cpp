@@ -123,6 +123,14 @@ void VinsRepublisher::timerInitialization(){
 
   mrs_lib::ParamLoader param_loader(shared_from_this(), get_name());
 
+  std::string custom_config_path;
+  param_loader.loadParam("custom_config", custom_config_path);
+
+  if (custom_config_path != "") {
+    RCLCPP_INFO(get_logger(), "loading custom config '%s", custom_config_path.c_str());
+    param_loader.addYamlFile(custom_config_path);
+  }
+
   param_loader.loadParam("uav_name", _uav_name_);
   param_loader.loadParam("velocity_in_body_frame", _velocity_in_body_frame_);
   param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
