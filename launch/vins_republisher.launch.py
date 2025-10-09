@@ -77,6 +77,13 @@ def generate_launch_description():
         description='Transform coordinates as whitespace-separated values: x y z roll pitch yaw'
     )
 
+    # Declare launch argument for using simulated time
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', 
+        default_value=False, 
+        description='Launch argument for using simulated time'
+    )
+
     # Static transform publishers - these define the sensor mounting positions
     # Transform 1: FCU to VINS front frame (sensor mounting offset)
     tf_fcu_to_vins_front = Node(
@@ -150,7 +157,7 @@ def generate_launch_description():
                 'velocity_in_body_frame': True,
                 'init_in_zero': True,
                 'compensate_initial_tilt': False,  # Set to false initially for simpler testing
-                'use_sim_time': True,
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'custom_config': sanitize_custom_config_path(LaunchConfiguration('custom_config'))
             },
         ],
@@ -195,7 +202,8 @@ def generate_launch_description():
         vins_fcu_frame_arg,
         vins_camera_mount_frame_arg,
         camera_mount_coords_arg,
-        
+        use_sim_time_arg,
+
         # UAV-specific nodes
         uav_group,
     ])
