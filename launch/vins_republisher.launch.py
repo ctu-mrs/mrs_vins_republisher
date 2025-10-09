@@ -162,9 +162,13 @@ def generate_launch_description():
             },
         ],
         remappings=[
-            # Default VINS remapping - change based on your VINS system
-            ('/uav1/vins_odom_in', '/uav1/odomimu'),
-            ('/uav1/vins_odom_out', '/odom'),
+            # subscribers
+            ('~/odom_in', 'open_vins/odomimu'),
+            # publishers
+            ('~/odom_out', '~/odom'),
+            ('~/status_string_out', '~/status_string'),
+            # service servers
+            ('~/calibrate_in', '~/calibrate'),
         ],
         extra_arguments=[{'use_intra_process_comms': True}],
     )

@@ -160,16 +160,16 @@ void VinsRepublisher::timerInitialization(){
 
   // | ----------------------- subscribers ---------------------- |
 
-  subscriber_vins_ = create_subscription<nav_msgs::msg::Odometry>("vins_odom_in", 10, std::bind(&VinsRepublisher::odometryCallback, this, std::placeholders::_1));
+  subscriber_vins_ = create_subscription<nav_msgs::msg::Odometry>("~/odom_in", 10, std::bind(&VinsRepublisher::odometryCallback, this, std::placeholders::_1));
 
   // | ----------------------- publishers ----------------------- |
 
-  publisher_odom_ = create_publisher<nav_msgs::msg::Odometry>("vins_odom_out", 10);
-  publisher_status_ = create_publisher<std_msgs::msg::String>("status_string", 2);
+  publisher_odom_ = create_publisher<nav_msgs::msg::Odometry>("~/odom_out", 10);
+  publisher_status_ = create_publisher<std_msgs::msg::String>("~/status_string_out", 2);
 
   if (compensate_initial_tilt_) {
     //srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback);
-    srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("srv_calibrate_in", std::bind(&VinsRepublisher::calibrateSrvCallback, this, std::placeholders::_1, std::placeholders::_2));
+    srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("~/calibrate_in", std::bind(&VinsRepublisher::calibrateSrvCallback, this, std::placeholders::_1, std::placeholders::_2));
   }
 
   is_initialized_ = true;
@@ -383,7 +383,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
     broadcaster_->sendTransform(tf_msg_inv);
   }
   catch (const tf2::TransformException& ex) {
-    RCLCPP_ERROR(get_logger(), 
+    RCLCPP_ERROR(get_logger(),
       "[VinsRepublisher]: TF Transform Exception during publishing TF: %s -> %s. "
       "Error: %s. Transform: [%.3f, %.3f, %.3f], [%.3f, %.3f, %.3f, %.3f], stamp: %f", 
       tf_msg_inv.header.frame_id.c_str(), 
