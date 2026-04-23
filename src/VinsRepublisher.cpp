@@ -21,6 +21,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
+#include <mrs_lib/node.h>
 #include <mrs_lib/param_loader.h>
 #include <mrs_lib/transformer.h>
 #include <mrs_lib/transform_broadcaster.h>
@@ -38,15 +39,14 @@ namespace vins_republisher
 
 /* class VinsRepublisher //{ */
 
-class VinsRepublisher : public rclcpp::Node {
+class VinsRepublisher : public mrs_lib::Node {
 public:
-  //virtual void onInit();
   VinsRepublisher(const rclcpp::NodeOptions & options);
 
 private:
-  /* timer initialization */
-  rclcpp::TimerBase::SharedPtr timer_initialization_;
-  void timerInitialization();
+  /* node */
+  rclcpp::Node::SharedPtr  node_;
+  rclcpp::Clock::SharedPtr clock_;
 
   /* flags */
   bool is_initialized_        = false;
@@ -102,32 +102,31 @@ private:
 
 //}
 
-/* onInit() //{ */
+/* VinsRepublisher() //{ */
 
-VinsRepublisher::VinsRepublisher(const rclcpp::NodeOptions & options) : rclcpp::Node("VinsRepublisher", options) {
-  timer_initialization_ = create_wall_timer(std::chrono::duration<double>(1.0), std::bind(&VinsRepublisher::timerInitialization, this));
-}
+VinsRepublisher::VinsRepublisher(const rclcpp::NodeOptions & options) : mrs_lib::Node("VinsRepublisher", options) {
+  node_  = this_node_ptr();
+  clock_ = node_->get_clock();
 
-void VinsRepublisher::timerInitialization(){
-  RCLCPP_INFO(get_logger(), "[%s]: Initializing", get_name());
+  RCLCPP_INFO(node_->get_logger(), "Initializing");
 
   /* waits for the ROS to publish clock */
   //rclcpp::Time::waitForValid(); TODO: replacement?
 
-  publisher_odom_last_published_ = get_clock()->now();
+  publisher_odom_last_published_ = clock_->now();
 
   mean_acc_ << 0, 0, 0;
 
   // | ---------- loading ros parameters using mrs_lib ---------- |
-  RCLCPP_INFO(get_logger(), "[%s]: loading parameters using ParamLoader", get_name());
+  RCLCPP_INFO(node_->get_logger(), "loading parameters using ParamLoader");
 
-  mrs_lib::ParamLoader param_loader(shared_from_this(), get_name());
+  mrs_lib::ParamLoader param_loader(node_);
 
   std::string custom_config_path;
   param_loader.loadParam("custom_config", custom_config_path);
 
   if (custom_config_path != "") {
-    RCLCPP_INFO(get_logger(), "loading custom config '%s", custom_config_path.c_str());
+    RCLCPP_INFO(node_->get_logger(), "loading custom config '%s", custom_config_path.c_str());
     param_loader.addYamlFile(custom_config_path);
   }
 
@@ -136,7 +135,7 @@ void VinsRepublisher::timerInitialization(){
   param_loader.loadParam("rate_limiter/enabled", _rate_limiter_enabled_);
   param_loader.loadParam("rate_limiter/max_rate", _rate_limiter_rate_);
   if (_rate_limiter_rate_ <= 1e-3) {
-    RCLCPP_ERROR(get_logger(), "[%s]: the rate limit has to be > 0", get_name());
+    RCLCPP_ERROR(node_->get_logger(), "the rate limit has to be > 0");
     rclcpp::shutdown();
   }
 
@@ -149,32 +148,31 @@ void VinsRepublisher::timerInitialization(){
   param_loader.loadParam("compensate_initial_tilt", compensate_initial_tilt_, false);
 
   if (!param_loader.loadedSuccessfully()) {
-    RCLCPP_ERROR(get_logger(), "[%s]: parameter loading failure", get_name());
+    RCLCPP_ERROR(node_->get_logger(), "parameter loading failure");
     rclcpp::shutdown();
   }
 
   /* transformation handler */
-  transformer_ = mrs_lib::Transformer(shared_from_this());
+  transformer_ = mrs_lib::Transformer(node_);
 
-  broadcaster_ = std::make_shared<mrs_lib::TransformBroadcaster>(shared_from_this());
+  broadcaster_ = std::make_shared<mrs_lib::TransformBroadcaster>(node_);
 
   // | ----------------------- subscribers ---------------------- |
 
-  subscriber_vins_ = create_subscription<nav_msgs::msg::Odometry>("~/odom_in", 10, std::bind(&VinsRepublisher::odometryCallback, this, std::placeholders::_1));
+  subscriber_vins_ = node_->create_subscription<nav_msgs::msg::Odometry>("~/odom_in", 10, std::bind(&VinsRepublisher::odometryCallback, this, std::placeholders::_1));
 
   // | ----------------------- publishers ----------------------- |
 
-  publisher_odom_ = create_publisher<nav_msgs::msg::Odometry>("~/odom_out", 10);
-  publisher_status_ = create_publisher<std_msgs::msg::String>("~/status_string_out", 2);
+  publisher_odom_ = node_->create_publisher<nav_msgs::msg::Odometry>("~/odom_out", 10);
+  publisher_status_ = node_->create_publisher<std_msgs::msg::String>("~/status_string_out", 2);
 
   if (compensate_initial_tilt_) {
-    //srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback);
-    srvs_calibrate_ = create_service<std_srvs::srv::SetBool>("~/calibrate_in", std::bind(&VinsRepublisher::calibrateSrvCallback, this, std::placeholders::_1, std::placeholders::_2));
+    //srvs_calibrate_ = node_->create_service<std_srvs::srv::SetBool>("srv_calibrate_in", &VinsRepublisher::calibrateSrvCallback);
+    srvs_calibrate_ = node_->create_service<std_srvs::srv::SetBool>("~/calibrate_in", std::bind(&VinsRepublisher::calibrateSrvCallback, this, std::placeholders::_1, std::placeholders::_2));
   }
 
   is_initialized_ = true;
-  timer_initialization_->cancel();
-  //RCLCPP_INFO_ONCE(get_logger(), "[%s]: initialized", get_name());
+  //RCLCPP_INFO_ONCE(node_->get_logger(), "initialized");
 }
 //}
 
@@ -262,21 +260,21 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   }
 
   if (!validateOdometry(*odom)) {
-    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: input odometry is not numerically valid");
+    RCLCPP_ERROR(node_->get_logger(), "input odometry is not numerically valid");
     return;
   }
 
-  //RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.seq);
-  RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.stamp.sec);
-  RCLCPP_DEBUG(get_logger(), "[VinsRepublisher]: %d ", odom->header.stamp.nanosec);
+  //RCLCPP_DEBUG(node_->get_logger(), "%d ", odom->header.seq);
+  RCLCPP_DEBUG(node_->get_logger(), "%d ", odom->header.stamp.sec);
+  RCLCPP_DEBUG(node_->get_logger(), "%d ", odom->header.stamp.nanosec);
 
-  RCLCPP_DEBUG(get_logger(), "[now]: %f", get_clock()->now().seconds());
-  RCLCPP_DEBUG(get_logger(), "[last published]: %f", publisher_odom_last_published_.seconds());
-  RCLCPP_DEBUG(get_logger(), "[fabs diff]: %f", fabs((get_clock()->now() - publisher_odom_last_published_).seconds()));
-  RCLCPP_DEBUG(get_logger(), "[diff]: %f", (get_clock()->now() - publisher_odom_last_published_).seconds());
-  RCLCPP_DEBUG(get_logger(), "[rate_limiter]: %f", 1.0 / _rate_limiter_rate_);
-  if (_rate_limiter_enabled_ && fabs((get_clock()->now() - publisher_odom_last_published_).seconds()) < (1.0 / (_rate_limiter_rate_))) {
-    RCLCPP_DEBUG(get_logger(), "[%s]: skipping over", get_name());
+  RCLCPP_DEBUG(node_->get_logger(), "[now]: %f", clock_->now().seconds());
+  RCLCPP_DEBUG(node_->get_logger(), "[last published]: %f", publisher_odom_last_published_.seconds());
+  RCLCPP_DEBUG(node_->get_logger(), "[fabs diff]: %f", fabs((clock_->now() - publisher_odom_last_published_).seconds()));
+  RCLCPP_DEBUG(node_->get_logger(), "[diff]: %f", (clock_->now() - publisher_odom_last_published_).seconds());
+  RCLCPP_DEBUG(node_->get_logger(), "[rate_limiter]: %f", 1.0 / _rate_limiter_rate_);
+  if (_rate_limiter_enabled_ && fabs((clock_->now() - publisher_odom_last_published_).seconds()) < (1.0 / (_rate_limiter_rate_))) {
+    RCLCPP_DEBUG(node_->get_logger(), "skipping over");
     return;
   }
 
@@ -333,7 +331,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   if (_init_in_zero_) {
     if (!got_init_pose_) {
       init_hdg_ = mrs_lib::AttitudeConverter(pose_transformed.orientation).getHeading();
-      RCLCPP_INFO(get_logger(), "[VinsRepublisher]: init hdg: %.2f", init_hdg_);
+      RCLCPP_INFO(node_->get_logger(), "init hdg: %.2f", init_hdg_);
       got_init_pose_ = true;
     }
 
@@ -376,15 +374,15 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   //   broadcaster_->sendTransform(tf_msg_inv);
   // }
   // catch (...) {
-  //   RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
+  //   RCLCPP_ERROR(node_->get_logger(), "Exception caught during publishing TF: %s - %s.", tf_msg_inv.child_frame_id.c_str(), tf_msg_inv.header.frame_id.c_str());
   // }
 
   try {
     broadcaster_->sendTransform(tf_msg_inv);
   }
   catch (const tf2::TransformException& ex) {
-    RCLCPP_ERROR(get_logger(),
-      "[VinsRepublisher]: TF Transform Exception during publishing TF: %s -> %s. "
+    RCLCPP_ERROR(node_->get_logger(),
+      "TF Transform Exception during publishing TF: %s -> %s. "
       "Error: %s. Transform: [%.3f, %.3f, %.3f], [%.3f, %.3f, %.3f, %.3f], stamp: %f", 
       tf_msg_inv.header.frame_id.c_str(), 
       tf_msg_inv.child_frame_id.c_str(),
@@ -399,16 +397,16 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
       tf_msg_inv.header.stamp.sec + tf_msg_inv.header.stamp.nanosec * 1e-9);
   }
   catch (const std::runtime_error& ex) {
-    RCLCPP_ERROR(get_logger(),
-      "[VinsRepublisher]: Runtime error during publishing TF: %s -> %s. "
+    RCLCPP_ERROR(node_->get_logger(),
+      "Runtime error during publishing TF: %s -> %s. "
       "Error: %s",
       tf_msg_inv.header.frame_id.c_str(),
       tf_msg_inv.child_frame_id.c_str(),
       ex.what());
   }
   catch (const std::exception& ex) {
-    RCLCPP_ERROR(get_logger(),
-      "[VinsRepublisher]: Standard exception during publishing TF: %s -> %s. "
+    RCLCPP_ERROR(node_->get_logger(),
+      "Standard exception during publishing TF: %s -> %s. "
       "Error: %s. Transform data: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f,%.3f]",
       tf_msg_inv.header.frame_id.c_str(),
       tf_msg_inv.child_frame_id.c_str(),
@@ -422,8 +420,8 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
       tf_msg_inv.transform.rotation.w);
   }
   catch (...) {
-    RCLCPP_ERROR(get_logger(),
-      "[VinsRepublisher]: Unknown exception during publishing TF: %s -> %s. "
+    RCLCPP_ERROR(node_->get_logger(),
+      "Unknown exception during publishing TF: %s -> %s. "
       "Transform: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f,%.3f] stamp: %f. "
       "Broadcaster state: %s",
       tf_msg_inv.header.frame_id.c_str(),
@@ -493,7 +491,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
 
   // validate
   if (!validateOdometry(odom_transformed)) {
-    RCLCPP_ERROR(get_logger(), "[VinsRepublisher]: transformed odometry is not numerically valid");
+    RCLCPP_ERROR(node_->get_logger(), "transformed odometry is not numerically valid");
     return;
   }
 
@@ -520,7 +518,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
       odom_transformed.pose.pose.orientation = mrs_lib::AttitudeConverter(q_calibrated);
 
       auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_transformed.pose.pose.orientation).getExtrinsicRPY();
-      //ROS_INFO_ONCE("[VinsRepublisher]: odom_transformed: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg]",
+      //RCLCPP_INFO_ONCE(node_->get_logger(), "odom_transformed: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.2f, %.2f) [deg]",
       //                  odom_transformed.pose.pose.position.x, odom_transformed.pose.pose.position.y, odom_transformed.pose.pose.position.z, roll * 180 / 3.14,
       //                  pitch * 180 / 3.14, yaw * 180 / 3.14);
     } else {
@@ -539,10 +537,10 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
   try {
     publisher_odom_->publish(odom_transformed);
     //RATE_LIMITED_LOG(1000, "Publishing");
-    publisher_odom_last_published_ = get_clock()->now();
+    publisher_odom_last_published_ = clock_->now();
   }
   catch (...) {
-    RCLCPP_ERROR(get_logger(), "exception caught during publishing topic '%s'", publisher_odom_->get_topic_name());
+    RCLCPP_ERROR(node_->get_logger(), "exception caught during publishing topic '%s'", publisher_odom_->get_topic_name());
   }
 
   try {
@@ -554,7 +552,7 @@ void VinsRepublisher::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr 
     //RATE_LIMITED_LOG(1000, "Publishing");
   }
   catch (...) {
-    RCLCPP_ERROR(get_logger(), "exception caught during publishing topic '%s'", publisher_status_->get_topic_name());
+    RCLCPP_ERROR(node_->get_logger(), "exception caught during publishing topic '%s'", publisher_status_->get_topic_name());
   }
 
 }
@@ -643,11 +641,11 @@ geometry_msgs::msg::PoseWithCovariance::_covariance_type VinsRepublisher::transf
 bool VinsRepublisher::calibrateSrvCallback(const std::shared_ptr<std_srvs::srv::SetBool::Request> req, std::shared_ptr<std_srvs::srv::SetBool::Response> res) {
 
   if (!has_valid_odom_) {
-    RCLCPP_ERROR(get_logger(), "service for calibration called before obtaining valid odom.");
+    RCLCPP_ERROR(node_->get_logger(), "service for calibration called before obtaining valid odom.");
     return false;
   }
 
-  RCLCPP_INFO(get_logger(), "calibrating level horizon.");
+  RCLCPP_INFO(node_->get_logger(), "calibrating level horizon.");
   auto [roll, pitch, yaw] = mrs_lib::AttitudeConverter(odom_init_.pose.pose.orientation).getExtrinsicRPY();
   //RATE_LIMITED_LOG(1000, "calibrated initial pose as: t: (%.2f, %.2f, %.2f) [m] rpy: (%.2f, %.f, %.2f) [deg]",
   //                  odom_init_.pose.pose.position.x, odom_init_.pose.pose.position.y, odom_init_.pose.pose.position.z, roll * 180 / 3.14, pitch * 180 / 3.14,
