@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.28)
 project(mrs_vins_republisher)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -33,8 +33,19 @@ add_library(MrsVinsRepublisher_component SHARED
 )
 
 # Apply dependencies to the target
-ament_target_dependencies(MrsVinsRepublisher_component
-  ${DEPENDENCIES}
+target_link_libraries(MrsVinsRepublisher_component
+  tf2::tf2
+  tf2_ros::tf2_ros
+  mrs_lib::mrs_lib
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_components::component
+  ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
+  ${std_msgs_TARGETS}
+  ${std_srvs_TARGETS}
+  tf2_geometry_msgs::tf2_geometry_msgs
 )
 
 # Register the component
@@ -58,12 +69,6 @@ install(TARGETS MrsVinsRepublisher_component
 install(DIRECTORY config launch
   DESTINATION share/${PROJECT_NAME}
 )
-
-# Install headers if needed
-#install(
-#  DIRECTORY include/
-#  DESTINATION include/
-#)
 
 ament_export_targets(
   export_MrsVinsRepublisher HAS_LIBRARY_TARGET
